@@ -16,7 +16,7 @@ The goal is to make experimentation with LLMs more accessible, without the need 
 
 ## Installation
 
-You can install it directly from the local repository (development mode):
+You can install it directly from the local repository:
 
 ```bash
 git clone <REPOSITORY_URL>
