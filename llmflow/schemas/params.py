@@ -1,0 +1,43 @@
+from dataclasses import dataclass, field
+from typing import Literal
+
+
+@dataclass
+class TrainParams:
+  batch_size: int = 1
+  gradient_accumulation: int = 8
+  epochs: int = 1
+  lr: float = 2e-5
+  optim: Literal[
+    "adamw_torch",
+    "adamw_torch_fused",
+    "sgd"
+  ] = "adamw_torch"
+
+@dataclass
+class LoraParams:
+  r: int
+  alpha: int
+  target_modules: list[str] | str | None = None
+  dropout: float = 0
+  bias: Literal["lora_only", "none", "all"] = "lora_only"
+  layers: list[int] | None = None
+
+@dataclass
+class GenerationBeamsParams:
+  num_beams: int | None = None
+  length_penalty: float | None = None
+  early_stopping: bool | None = None
+
+@dataclass
+class GenerationSampleParams:
+  temperature: float | None = None
+  top_p: float | None = None
+  typical_p: float | None = None
+
+@dataclass
+class GenerationParams:
+  max_new_tokens: int | None = None
+  repetition_penalty: float | None = None
+  sample: GenerationSampleParams = field(default_factory=GenerationSampleParams)
+  beams: GenerationBeamsParams = field(default_factory=GenerationBeamsParams)
