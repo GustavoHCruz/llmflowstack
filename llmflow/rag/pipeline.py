@@ -1,4 +1,5 @@
 import textwrap
+from importlib import metadata
 
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -43,65 +44,34 @@ class RAGPipeline:
       add_start_index=True,
     )
   
-  def from_dicts(
-    self,
-    rows: list[dict[str, str]],
-    text_key: str = "Description",
-    metadata_keys: list[str] | None = None,
-    should_index: bool = True
-  ) -> list[Document]:
-    docs = []
-    for row in rows:
-      page_content = row[text_key]
-      metadata = {k: row[k] for k in metadata_keys} if metadata_keys else {}
-      docs.append(Document(page_content=page_content, metadata=metadata))
-
-    if should_index:
-      self.index_documents(docs)
-    return docs
-  
-  def state_prompt(
-    self,
-    question: str,
-    context: str
-  ) -> str:
-    return textwrap.dedent(
-      f"Use the following context to answer the question.\n"
-      f"If you don't know, say you don't know.\n"
-      f"You must reference the context by adding <reference>\n"
-      f"Question: {question}\n"
-      f"Context: {context}\n"
-      f"Answer:"
-    )
-
   def index_documents(
     self,
     docs: list[Document]
   ) -> None:
     splits = self.splitter.split_documents(docs)
     self.vector_store.add_documents(splits)
-
-  def retrieve(
+  
+  def create(
     self,
-    query: str,
-    k: int = 4
-  ) -> list[Document]:
-    return self.vector_store.similarity_search(query, k=k)
+    information: str,
+    other_info: dict[str, str] = {},
+    should_index: bool = True
+  ) -> Document:
+    doc = Document(
+      page_content=information,
+      metadata=other_info
+    )
 
-  def build_prompt(
-    self,
-    question: str,
-    context_docs: list[Document]
-  ) -> str:
-    docs_content = "\n\n".join(doc.page_content for doc in context_docs)
+    if should_index:
+      self.index_documents(docs=[doc])
 
-    return self.state_prompt(question, docs_content)
+    return doc
 
   def query(
     self,
-    question: str,
+    query: str,
     k: int = 4
-  ) -> dict[str, object]:
-    context = self.retrieve(question, k=k)
-    prompt = self.build_prompt(question, context)
-    return {"prompt": prompt, "context": context}
+  ) -> str:
+    docs = self.vector_store.similarity_search(query, k=k)
+
+    return "\n\n".join(doc.page_content for doc in docs)
