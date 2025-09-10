@@ -264,11 +264,13 @@ class GPT_OSS(BaseModel):
 
 		self._log(f"Response generated in {total_time:.4f} seconds")
 
-		start = answer.find("final<|message|>")
+		start = answer.find("|>final")
+
 		if start == -1:
 			return ""
+		
+		start = answer.find("<|message|>", start) + len("<|message|>")
 
-		start = answer.find("final<|message|>") + len("final<|message|>")
 		end = answer.find("<|return|>", start)
 		if end == -1:
 			end = len(answer)
