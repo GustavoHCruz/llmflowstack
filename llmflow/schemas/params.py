@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Literal
 
+from transformers import TextIteratorStreamer
+
 
 @dataclass
 class TrainParams:
@@ -41,3 +43,4 @@ class GenerationParams:
   repetition_penalty: float | None = None
   sample: GenerationSampleParams = field(default_factory=GenerationSampleParams)
   beams: GenerationBeamsParams = field(default_factory=GenerationBeamsParams)
+  streamer: TextIteratorStreamer | None = None

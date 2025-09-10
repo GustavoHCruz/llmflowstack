@@ -210,6 +210,7 @@ class LLaMA3(BaseModel):
 				attention_mask=attention_mask,
 				use_cache=True,
 				eos_token_id=None,
+				streamer=params.streamer,
 				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids, self.tokenizer, self.log_level == "DEBUG")])
 			)
 
