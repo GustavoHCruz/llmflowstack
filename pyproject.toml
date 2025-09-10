@@ -1,0 +1,40 @@
+[build-system]
+requires = ["hatchling >= 1.26"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llmflow"
+version = "0.4.0"
+authors = [
+  { name = "Gustavo Henrique", email = "ghfc2000@hotmail.com" }
+]
+description = "LLMFlow is a framework for training and using LLMs (LLaMA, GPT-OSS, Gemma). Supports DAPT, fine-tuning, and distributed inference. Public fork without institution-specific components."
+readme = "README.md"
+requires-python = ">=3.13"
+license = {text = "MIT"}
+
+dependencies = [
+    "accelerate",
+    "bert-score",
+    "bitsandbytes",
+    "colorama",
+    "datasets",
+    "evaluate",
+    "huggingface-hub",
+    "nltk",
+    "numpy",
+    "pandas",
+    "peft",
+    "rouge-score",
+    "safetensors",
+    "scikit-learn",
+    "scipy",
+    "sentence-transformers",
+    "tqdm",
+    "torch",
+    "torchvision",
+    "torchaudio",
+    "transformers",
+    "triton",
+    "trl",
+]
