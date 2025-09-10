@@ -4,6 +4,7 @@ import os
 import random
 from abc import ABC, abstractmethod
 from typing import Any, Literal, cast
+from uuid import uuid4
 
 import numpy as np
 import torch
@@ -72,6 +73,11 @@ class BaseModel(ABC):
 		with open(os.path.join(checkpoint, "custom_info.json"), "r") as f:
 			data = json.load(f)
 		self._model_id = data.get("model_id", None)
+	
+	def _create_model_id(
+		self
+	) -> None:
+		self._model_id = uuid4()
 
 	def _set_logger(
 		self,
