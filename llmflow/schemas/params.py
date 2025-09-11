@@ -17,15 +17,6 @@ class TrainParams:
   ] = "adamw_torch"
 
 @dataclass
-class LoraParams:
-  r: int
-  alpha: int
-  target_modules: list[str] | str | None = None
-  dropout: float = 0
-  bias: Literal["lora_only", "none", "all"] = "lora_only"
-  layers: list[int] | None = None
-
-@dataclass
 class GenerationBeamsParams:
   num_beams: int | None = None
   length_penalty: float | None = None

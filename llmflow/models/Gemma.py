@@ -3,7 +3,6 @@ from time import time
 from typing import Literal, TypedDict
 
 import torch
-from peft import PeftModelForCausalLM
 from transformers import StoppingCriteriaList
 from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
@@ -23,6 +22,8 @@ class GemmaInput(TypedDict):
 class Gemma(BaseModel):
 	model: Gemma3ForCausalLM | None = None
 	can_think = False
+	question_fields = ["input_text", "system_message"]
+	answer_fields = ["expected_answer"]
 
 	def _set_generation_stopping_tokens(
 		self,
@@ -33,16 +34,12 @@ class Gemma(BaseModel):
 			return None
 		particular_tokens = self.tokenizer.encode("<end_of_turn>")
 		self.stop_token_ids = tokens + particular_tokens
-
-	def load_checkpoint(
+	
+	def _load_model(
 		self,
 		checkpoint: str,
-		adapter_path: str | None = None,
 		quantization: Literal["8bit", "4bit"] | bool | None = None
 	) -> None:
-		self._log(f"Loading model on '{checkpoint}'")
-		self._load_tokenizer(checkpoint)
-
 		quantization_config = None
 		if quantization == "4bit":
 			quantization_config = BitsAndBytesConfig(
@@ -53,9 +50,6 @@ class Gemma(BaseModel):
 				load_in_8bit=True
 			)
 
-		if quantization_config:
-			self.model_is_quantized = True
-
 		self.model = Gemma3ForCausalLM.from_pretrained(
 			checkpoint,
 			quantization_config=quantization_config,
@@ -63,30 +57,6 @@ class Gemma(BaseModel):
 			device_map="auto",
 			attn_implementation="eager"
 		)
-
-		self._log("Model & Tokenizer loaded")
-
-		if adapter_path:
-			self._log(f"Loading adapter on '{adapter_path}'")
-			self.adapter = PeftModelForCausalLM.from_pretrained(self.model, adapter_path)
-			self._log(f"Adapter loaded")
-		else:
-			if self.adapter is not None:
-				self._log("LoRA adapter found. Using the adpter with a different base model could lead to errors.", "WARNING")
-
-		if not self._model_id:
-			self._create_model_id()
-
-		stop_tokens = []
-		pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
-		if pad_token_id:
-			stop_tokens.append(pad_token_id)
-		eos_token_id = getattr(self.tokenizer, "eos_token_id", None)
-		if eos_token_id:
-			stop_tokens.append(eos_token_id)
-
-		self._set_generation_stopping_tokens(stop_tokens)
-		self.stop_token_ids = list(set(self.stop_token_ids))
 
 	def _build_input(
 		self,
@@ -129,57 +99,6 @@ class Gemma(BaseModel):
 			"system_message": system_message
 		}
 
-	def _build_input_for_fine_tune(
-		self,
-		input: GemmaInput
-	) -> dict[Literal["partial", "complete"], str]:
-		if not self.tokenizer:
-			raise MissingEssentialProp("Could not find tokenizer.")
-
-		partial = self._build_input(
-			input_text=input["input_text"],
-			expected_answer=input["expected_answer"]
-		)
-
-		complete = self._build_input(
-			input_text=input["input_text"],
-			expected_answer=input["expected_answer"],
-			system_message=input["system_message"]
-		)
-
-		return {
-			"partial": partial,
-			"complete": complete
-		}
-
-	def _promptfy_dataset_for_dapt(
-		self,
-		dataset: list[GemmaInput]
-	) -> list[str]:
-		output = []
-		for data in dataset:
-			complete_input = self._build_input(
-				input_text=data["input_text"],
-				expected_answer=data.get("expected_answer", None),
-				system_message=data.get("system_message", None)
-			)
-			output.append(complete_input)
-		
-		return output
-
-	def _promptfy_dataset_for_fine_tune(
-		self,
-		dataset: list[GemmaInput]
-	) -> list[dict[Literal["partial", "complete"], str]]:
-		output = []
-		for data in dataset:
-			builded_inputs = self._build_input_for_fine_tune(
-				input=data
-			)
-			output.append(builded_inputs)
-
-		return output
-
 	def set_can_think(self, value: bool) -> None:
 		self.can_think = value
 
@@ -187,20 +106,10 @@ class Gemma(BaseModel):
 		self,
 		input: GemmaInput | str,
 		params: GenerationParams | None = None,
-		target: Literal["model", "adapter"] = "model"
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
 			self._log("Model or Tokenizer missing", "WARNING")
 			return None
-
-		if target == "model":
-			model = self.model
-		else:
-			if self.adapter is None:
-				self._log("Adapter missing. Defaulting to model.", "WARNING")
-				model = self.model
-			else:
-				model = self.adapter
 
 		self._log(f"Processing received input...'")
 
@@ -227,8 +136,8 @@ class Gemma(BaseModel):
 
 		input_ids, attention_mask = tokenized_input
 
-		model.eval()
-		model.gradient_checkpointing_disable()
+		self.model.eval()
+		self.model.gradient_checkpointing_disable()
 		start = time()
 
 		with torch.no_grad():
@@ -238,7 +147,7 @@ class Gemma(BaseModel):
 				use_cache=True,
 				eos_token_id=None,
 				streamer=params.streamer,
-				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids, self.tokenizer, self.log_level == "DEBUG")])
+				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 			)
 
 		answer = self.tokenizer.decode(outputs[0])

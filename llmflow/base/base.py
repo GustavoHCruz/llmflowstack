@@ -10,7 +10,6 @@ import numpy as np
 import torch
 from colorama import Fore, Style, init
 from datasets import Dataset
-from peft import LoraConfig, get_peft_model
 from torch import Tensor
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
 from transformers.tokenization_utils_base import BatchEncoding
@@ -18,28 +17,31 @@ from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
 from llmflow.callbacks.log_collector import LogCollectorCallback
-from llmflow.schemas.params import GenerationParams, LoraParams, TrainParams
+from llmflow.schemas.params import GenerationParams, TrainParams
 from llmflow.utils.exceptions import MissingEssentialProp
 
 
 class BaseModel(ABC):
 	model = None
 	tokenizer = None
-	adapter: Any = None
 	_model_id = None
 	model_is_quantized = None
 	seed = None
 	log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO"
 	stop_token_ids = []
+	question_fields = []
+	answer_fields = []
 
 	def __init__(
 		self,
 		checkpoint: str | None = None,
-		adapter_path: str | None = None,
 		quantization: Literal["8bit", "4bit"] | bool | None = None,
 		seed: int | None = None,
 		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
 	) -> None:
+		if not self.question_fields or not self.answer_fields:
+			raise NotImplementedError("Subclasses must define question_fields and answer_fields.")
+
 		init(autoreset=True)
 		if seed:
 			self._set_seed(seed)
@@ -55,19 +57,68 @@ class BaseModel(ABC):
 			self._checkpoint = checkpoint
 			self.load_checkpoint(
 				checkpoint=checkpoint,
-				adapter_path=adapter_path,
 				quantization=quantization
 			)
+	
+	@abstractmethod
+	def _load_model(
+		self,
+		checkpoint: str,
+		quantization: Literal["8bit", "4bit"] | bool | None = None
+	) -> None:
+		pass
+
+	def _load_tokenizer(self, checkpoint: str) -> None:
+		tokenizer = AutoTokenizer.from_pretrained(checkpoint)
+		tokenizer.pad_token = tokenizer.eos_token
+		tokenizer.add_eos_token = True
+		tokenizer.padding_side = "right"
+
+		self.tokenizer = tokenizer
+	
+	def load_checkpoint(
+		self,
+		checkpoint: str,
+		quantization: Literal["8bit", "4bit"] | bool | None = None
+	) -> None:
+		if self.model:
+			self._log("A model is already loaded. Attempting to reset it.", "WARNING")
+			self.unload_model()
+
+		self._log(f"Loading model on '{checkpoint}'")
+
+		self._load_tokenizer(checkpoint)
+		self._load_model(
+			checkpoint=checkpoint,
+			quantization=quantization
+		)
+
+		self._log("Model & Tokenizer loaded")
+		
+		if quantization:
+			self.model_is_quantized = True
+
+		if not self._model_id:
+			self._create_model_id()
+		
+		stop_tokens = []
+		pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
+		if pad_token_id:
+			stop_tokens.append(pad_token_id)
+		eos_token_id = getattr(self.tokenizer, "eos_token_id", None)
+		if eos_token_id:
+			stop_tokens.append(eos_token_id)
+
+		self._set_generation_stopping_tokens(stop_tokens)
+		self.stop_token_ids = list(set(self.stop_token_ids))
 
 	def from_pretrained(
 		self,
 		checkpoint: str,
-		adapter_path: str | None = None,
 		quantization: Literal["8bit", "4bit"] | bool | None = None
 	) -> None:
 		self.load_checkpoint(
 			checkpoint=checkpoint,
-			adapter_path=adapter_path,
 			quantization=quantization
 		)
 		with open(os.path.join(checkpoint, "custom_info.json"), "r") as f:
@@ -107,7 +158,10 @@ class BaseModel(ABC):
 			colored_msg = f"{Fore.BLUE}{info}{Style.RESET_ALL}"
 			self.logger.debug(colored_msg)
 
-	def _set_seed(self, seed):
+	def _set_seed(
+		self,
+		seed: int
+	) -> None:
 		self.seed = seed
 		random.seed(seed)
 		np.random.seed(seed)
@@ -121,35 +175,9 @@ class BaseModel(ABC):
 		os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
 		os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
-	def create_lora_adapter(
-		self,
-		lora_params: LoraParams
-	) -> None:
-		if not self.model:
-			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
-			return
-
-		self._log("Creating a new LoRA adapter...")
-
-		lora_config = LoraConfig(
-				r=lora_params.r,
-				lora_alpha=lora_params.alpha,
-				target_modules=lora_params.target_modules,
-				lora_dropout=lora_params.dropout,
-				layers_to_transform=lora_params.layers,
-				bias=lora_params.bias,
-				task_type="CAUSAL_LM"
-			)
-
-		self.adapter = get_peft_model(self.model, lora_config)
-
-		self._log("LoRA adapter successfully created")
-
 	def save_checkpoint(
 		self,
-		path: str,
-		target: Literal["model", "adapter"],
-		merge_and_load = False
+		path: str
 	) -> None:
 		if not self.model:
 			self._log("No model to save.", "WARNING")
@@ -160,19 +188,8 @@ class BaseModel(ABC):
 
 		os.makedirs(path, exist_ok=True)
 
-		if target == "adapter":
-			if not self.adapter:
-				self._log("No adapter to save.", "WARNING")
-				return None
-			if merge_and_load:
-				self._log("Merging LoRA adapters and saving...")
-				model_to_save = self.adapter.merge_and_unload(progressbar=True)
-			else:
-				self._log("Saving LoRA adapters...")
-				model_to_save = self.adapter
-		else:
-			self._log("Saving model...")
-			model_to_save = self.model
+		self._log("Saving model...")
+		model_to_save = self.model
 
 		model_to_save.save_pretrained(path)
 		self.tokenizer.save_pretrained(path)
@@ -185,31 +202,6 @@ class BaseModel(ABC):
 			}, f)
 
 		self._log(f"Model custom information saved at {path}")
-
-	def _load_tokenizer(self, checkpoint: str) -> None:
-		tokenizer = AutoTokenizer.from_pretrained(checkpoint)
-		tokenizer.pad_token = tokenizer.eos_token
-		tokenizer.add_eos_token = True
-		tokenizer.padding_side = "right"
-
-		self.tokenizer = tokenizer
-
-	@abstractmethod
-	def load_checkpoint(
-		self,
-		checkpoint: str,
-		adapter_path: str | None = None,
-		quantization: Literal["8bit", "4bit"] | bool | None = None
-	) -> None:
-		pass
-
-	def merge_adapter(
-		self
-	) -> None:
-		if not self.model or not self.adapter:
-			self._log("There is not a model or adapter loaded. Aborting merge.", "WARNING")
-		
-		self.model = self.adapter.merge_and_unload(progressbar=True)
 
 	@abstractmethod
 	def _set_generation_stopping_tokens(
@@ -313,37 +305,39 @@ class BaseModel(ABC):
 			})
 		return Dataset.from_list(tokenized)
 
-	@abstractmethod
 	def _promptfy_dataset_for_dapt(
 		self,
-		dataset: list[Any]
+		dataset: list[dict[str, str | None]]
 	) -> list[str]:
-		pass
+		output = []
+		for data in dataset:
+			complete_input = self._build_input(
+				**{field: data.get(field) for field in self.answer_fields}
+			)
+			output.append(complete_input)
+
+		return output
 
 	def dapt(
 		self,
 		train_params: TrainParams,
 		train_dataset: list[Any],
 		eval_dataset: list[Any] | None = None,
-		target: Literal["model", "adapter"] = "model",
 		save_at_end = True,
 		save_path: str | None = None
 	) -> None:
 		if not self.model:
 			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
 			return
-		if target=="adapter" and not self.adapter:
-			self._log("Could not find a adapter loaded.", "WARNING")
 		if not self.tokenizer:
 			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
 			return
 
 		self._log("Starting DAPT")
 
-		if target == "model":
-			if self.model_is_quantized:
-				self._log("Cannot DAPT a quantized model.", "WARNING")
-				return None
+		if self.model_is_quantized:
+			self._log("Cannot DAPT a quantized model.", "WARNING")
+			return None
 
 		training_arguments = SFTConfig(
 			num_train_epochs=train_params.epochs,
@@ -359,10 +353,7 @@ class BaseModel(ABC):
 		if self.seed is not None:
 			training_arguments.seed = self.seed
 
-		if target == "model":
-			model = self.model
-		else:
-			model = self.adapter
+		model = self.model
 
 		processed_train_dataset = self._promptfy_dataset_for_dapt(train_dataset)
 		tokenized_train_dataset = self._tokenize_dataset_for_dapt(processed_train_dataset)
@@ -386,23 +377,36 @@ class BaseModel(ABC):
 
 		if save_at_end and save_path:
 			self.save_checkpoint(
-				path=save_path,
-				target=target
+				path=save_path
 			)
 
-		if target == "model":
-			self.model = model
-		else:
-			self.adapter = model
+		self.model = model
 
 		self._log("Finished DAPT")
 
 	@abstractmethod
+	def _build_input(
+		self,
+		*args: Any,
+		**kwargs: Any
+	) -> str:
+		pass
+
 	def _build_input_for_fine_tune(
 		self,
-		input: Any
+		input: dict
 	) -> dict[Literal["partial", "complete"], str]:
-		pass
+		if not self.tokenizer:
+			raise MissingEssentialProp("Could not find tokenizer.")
+
+		partial = self._build_input(**{k: input[k] for k in self.question_fields if k in input})
+
+		complete = self._build_input(**{k: input[k] for k in self.question_fields + self.answer_fields if k in input})
+
+		return {
+			"partial": partial,
+			"complete": complete
+		}
 
 	def _promptfy_dataset_for_fine_tune(
 		self,
@@ -422,25 +426,21 @@ class BaseModel(ABC):
 		train_params: TrainParams,
 		train_dataset: list[Any],
 		eval_dataset: list[Any] | None = None,
-		target: Literal["model", "adapter"] = "model",
 		save_at_end = True,
 		save_path: str | None = None
 	) -> None:
 		if not self.model:
 			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
 			return
-		if target=="adapter" and not self.adapter:
-			self._log("Could not find a adapter loaded.", "WARNING")
 		if not self.tokenizer:
 			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
 			return
 
 		self._log("Starting fine-tune")
 
-		if target == "model":
-			if self.model_is_quantized:
-				self._log("Cannot fine-tune a quantized model.", "WARNING")
-				return None
+		if self.model_is_quantized:
+			self._log("Cannot fine-tune a quantized model.", "WARNING")
+			return None
 
 		training_arguments = SFTConfig(
 			learning_rate=train_params.lr,
@@ -457,11 +457,6 @@ class BaseModel(ABC):
 		if self.seed is not None:
 			training_arguments.seed = self.seed
 
-		if target == "model":
-			model = self.model
-		else:
-			model = self.adapter
-
 		processed_train_dataset = self._promptfy_dataset_for_fine_tune(train_dataset)
 		tokenized_train_dataset = self._tokenize_dataset_for_fine_tune(processed_train_dataset)
 
@@ -473,7 +468,7 @@ class BaseModel(ABC):
 		log_callback = LogCollectorCallback()
 
 		trainer = SFTTrainer(
-			model=model,
+			model=self.model,
 			train_dataset=tokenized_train_dataset,
 			eval_dataset=tokenized_eval_dataset,
 			args=training_arguments,
@@ -484,14 +479,8 @@ class BaseModel(ABC):
 
 		if save_at_end and save_path:
 			self.save_checkpoint(
-				path=save_path,
-				target=target
+				path=save_path
 			)
-
-		if target == "model":
-			self.model = model
-		else:
-			self.adapter = model
 
 		self._log("Finished fine-tune")
 
@@ -499,20 +488,9 @@ class BaseModel(ABC):
 	def generate(
 		self,
 		input: Any,
-		params: GenerationParams | None = None,
-		target: Literal["model", "adapter"] = "model"
+		params: GenerationParams | None = None
 	) -> str | None:
 		pass
-
-	def unload_adapter(self) -> None:
-		try:
-			self._log("Trying to reset adapter...")
-			del self.adapter
-			self.adapter = None
-			self._log("Adapter successfully reseted")
-		except Exception as e:
-			self._log("Couldn't reset adapter...", "ERROR")
-			self._log(f"{str(e)}", "DEBUG")
 
 	def unload_model(self) -> None:
 		try:
@@ -521,15 +499,17 @@ class BaseModel(ABC):
 			self.model = None
 			self.model_is_quantized = None
 			self.process_id = None
+			self._model_id = None
+			self._log("Reset successfully.")
 		except Exception as e:
 			self._log("Couldn't reset model...", "ERROR")
 			self._log(f"{str(e)}", "DEBUG")
-
-	def unload_all(self) -> None:
-		self.unload_adapter()
-		self.unload_model()
 
 	def set_seed(self, seed: int) -> None:
 		self._log(f"Setting seed value {seed}")
 		self._set_seed(seed)
 		self._log(f"Seed setted")
+
+	def __del__(self) -> None:
+		self.unload_model()
+		del self.tokenizer

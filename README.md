@@ -41,10 +41,9 @@ first_model.load_checkpoint(
   checkpoint="/llama-3.1-8b-Instruct",
 )
 
-# Loading a LLaMA model, with a adapter and quantized
+# Loading a quantized LLaMA model
 second_model = LLaMA3(
   checkpoint="/llama-3.3-70b-Instruct",
-  adapter_path="/lora-adapter",
   quantization="4bit"
 )
 
@@ -91,7 +90,7 @@ thrid_model = GPT_OSS(
 
 ```python
 from llmflow import LLaMA3
-from llmflow.schemas import LoraParams, TrainParams
+from llmflow.schemas import TrainParams
 
 model = LLaMA3(
   checkpoint="llama-3.1-8b-Instruct"
@@ -109,7 +108,7 @@ dataset.append(model.build_input(
   expected_answer="White!"
 ))
 
-# Does the DAPT in the full model (target="model")
+# Does the DAPT in the full model
 model.dapt(
   train_dataset=dataset,
   train_params=TrainParams(
@@ -117,23 +116,12 @@ model.dapt(
     epochs=3,
     gradient_accumulation=1,
     lr=2e-5
-  ),
-  target="model"
-)
-
-# Create a LoRA Adapter (it will allow you to train it)
-model.create_lora_adapter(
-  lora_params=LoraParams(
-    r=16,
-    alpha=32,
-    target_modules="all-linear"
   )
 )
 
-# Does the fine-tune in the adapter this time (target="adapter")
+# Does the fine-tune this time
 model.fine_tune(
   train_dataset=dataset,
-  target="adapter",
   train_params=TrainParams(
     batch_size=1,
     gradient_accumulation=1,
@@ -141,15 +129,13 @@ model.fine_tune(
     epochs=50
   ),
   save_at_end=True,
-  # It will save the adapter, since the target was set to it
-  save_path="./adapter-output"
+  # It will save the model
+  save_path="./output"
 )
 
-# Merge the adapter into the model (completely optional step)
-model.merge_adapter()
+# Saving the final result
 model.save_checkpoint(
-  path="./model-output",
-  target="model"
+  path="./model-output"
 )
 ```
 

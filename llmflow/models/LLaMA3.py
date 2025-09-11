@@ -3,7 +3,6 @@ from time import time
 from typing import Literal, TypedDict
 
 import torch
-from peft import PeftModelForCausalLM
 from transformers import StoppingCriteriaList
 from transformers.models.llama import LlamaForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
@@ -22,6 +21,8 @@ class LLaMA3Input(TypedDict):
 
 class LLaMA3(BaseModel):
 	model: LlamaForCausalLM | None = None
+	question_fields = ["input_text", "system_message"]
+	answer_fields = ["expected_answer"]
 
 	def _set_generation_stopping_tokens(
 		self,
@@ -33,15 +34,11 @@ class LLaMA3(BaseModel):
 		particular_tokens = self.tokenizer.encode("<|eot_id|>")
 		self.stop_token_ids = tokens + particular_tokens
 
-	def load_checkpoint(
+	def _load_model(
 		self,
 		checkpoint: str,
-		adapter_path: str | None = None,
 		quantization: Literal["8bit", "4bit"] | bool | None = None
 	) -> None:
-		self._log(f"Loading model on '{checkpoint}'")
-		self._load_tokenizer(checkpoint)
-
 		quantization_config = None
 		if quantization == "4bit":
 			quantization_config = BitsAndBytesConfig(
@@ -61,30 +58,6 @@ class LLaMA3(BaseModel):
 			device_map="auto",
 			attn_implementation="eager"
 		)
-
-		self._log("Model & Tokenizer loaded")
-
-		if adapter_path:
-			self._log(f"Loading adapter on '{adapter_path}'")
-			self.adapter = PeftModelForCausalLM.from_pretrained(self.model, adapter_path)
-			self._log(f"Adapter loaded")
-		else:
-			if self.adapter is not None:
-				self._log("LoRA adapter found. Using the adpter with a different base model could lead to errors.", "WARNING")
-
-		if not self._model_id:
-			self._create_model_id()
-
-		stop_tokens = []
-		pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
-		if pad_token_id:
-			stop_tokens.append(pad_token_id)
-		eos_token_id = getattr(self.tokenizer, "eos_token_id", None)
-		if eos_token_id:
-			stop_tokens.append(eos_token_id)
-
-		self._set_generation_stopping_tokens(stop_tokens)
-		self.stop_token_ids = list(set(self.stop_token_ids))
 
 	def _build_input(
 		self,
@@ -114,61 +87,16 @@ class LLaMA3(BaseModel):
 			"expected_answer": expected_answer
 		}
 
-	def _build_input_for_fine_tune(
-		self,
-		input: LLaMA3Input
-	) -> dict[Literal["partial", "complete"], str]:
-		if not self.tokenizer:
-			raise MissingEssentialProp("Could not find tokenizer.")
-
-		partial = self._build_input(
-			input_text=input["input_text"],
-			system_message=input["system_message"]
-		)
-		complete = self._build_input(
-			input_text=input["input_text"],
-			expected_answer=input["expected_answer"],
-			system_message=input["system_message"]
-		)
-
-		return {
-			"partial": partial,
-			"complete": complete
-		}
-
-	def _promptfy_dataset_for_dapt(
-		self,
-		dataset: list[LLaMA3Input]
-	) -> list[str]:
-		output = []
-		for data in dataset:
-			complete_input = self._build_input(
-				input_text=data["input_text"],
-				expected_answer=data.get("expected_answer", None),
-				system_message=data.get("system_message", None)
-			)
-			output.append(complete_input)
-
-		return output
-
 	def generate(
 		self,
 		input: LLaMA3Input | str,
-		params: GenerationParams | None = None,
-		target: Literal["model", "adapter"] = "model",
+		params: GenerationParams | None = None
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
 			self._log("Model or Tokenizer missing", "WARNING")
 			return None
 
-		if target == "model":
-			model = self.model
-		else:
-			if self.adapter is None:
-				self._log("Adapter missing. Defaulting to model.", "WARNING")
-				model = self.model
-			else:
-				model = self.adapter
+		self.model
 
 		self._log(f"Processing received input...'")
 
@@ -199,8 +127,8 @@ class LLaMA3(BaseModel):
 
 		input_ids, attention_mask = tokenized_input
 
-		model.eval()
-		model.gradient_checkpointing_disable()
+		self.model.eval()
+		self.model.gradient_checkpointing_disable()
 
 		start = time()
 
@@ -211,7 +139,7 @@ class LLaMA3(BaseModel):
 				use_cache=True,
 				eos_token_id=None,
 				streamer=params.streamer,
-				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids, self.tokenizer, self.log_level == "DEBUG")])
+				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 			)
 
 		end = time()

@@ -4,7 +4,6 @@ from typing import Literal, TypedDict
 
 import torch
 from openai_harmony import HarmonyEncodingName, load_harmony_encoding
-from peft import PeftModelForCausalLM
 from transformers import StoppingCriteriaList
 from transformers.models.gpt_oss import GptOssForCausalLM
 from transformers.utils.quantization_config import Mxfp4Config
@@ -18,15 +17,17 @@ from llmflow.utils.generation_utils import create_generation_params
 
 class GPTOSSInput(TypedDict):
 	input_text: str
-	expected_answer: str | None
 	system_message: str | None
-	reasoning_message: str | None
 	developer_message: str | None
+	expected_answer: str | None
+	reasoning_message: str | None
 	reasoning_level: Literal["Low", "Medium", "High"] | None
 
 class GPT_OSS(BaseModel):
 	model: GptOssForCausalLM | None = None
 	reasoning_level: Literal["Low", "Medium", "High"] = "Low"
+	question_fields = ["input_text", "developer_message", "system_message"]
+	answer_fields = ["expected_answer", "reasoning_message"]
 
 	def _set_generation_stopping_tokens(
 		self,
@@ -39,15 +40,11 @@ class GPT_OSS(BaseModel):
 		particular_tokens = encoding.stop_tokens_for_assistant_actions()
 		self.stop_token_ids = particular_tokens + tokens
 
-	def load_checkpoint(
+	def _load_model(
 		self,
 		checkpoint: str,
-		adapter_path: str | None = None,
 		quantization: Literal["8bit", "4bit"] | bool | None = False
 	) -> None:
-		self._log(f"Loading model on '{checkpoint}'")
-		self._load_tokenizer(checkpoint)
-
 		if quantization:
 			self.model_is_quantized = True
 			quantization_config = Mxfp4Config(dequantize=False)
@@ -57,10 +54,10 @@ class GPT_OSS(BaseModel):
 		try:
 			self.model = GptOssForCausalLM.from_pretrained(
 				checkpoint,
+				quantization_config=quantization_config,
 				dtype="auto",
 				device_map="auto",
 				attn_implementation="eager",
-				quantization_config=quantization_config,
 			)
 		except Exception as _:
 			self._log("Error trying to load the model. Defaulting to load without quantization...", "WARNING")
@@ -70,30 +67,6 @@ class GPT_OSS(BaseModel):
 				device_map="auto",
 				attn_implementation="eager"
 			)
-
-		self._log("Model & Tokenizer loaded")
-
-		if adapter_path:
-			self._log(f"Loading adapter on '{adapter_path}'")
-			self.adapter = PeftModelForCausalLM.from_pretrained(self.model, adapter_path)
-			self._log(f"Adapter loaded")
-		else:
-			if self.adapter is not None:
-				self._log("LoRA adapter found. Using the adpter with a different base model could lead to errors.", "WARNING")
-
-		if not self._model_id:
-			self._create_model_id()
-
-		stop_tokens = []
-		pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
-		if pad_token_id:
-			stop_tokens.append(pad_token_id)
-		eos_token_id = getattr(self.tokenizer, "eos_token_id", None)
-		if eos_token_id:
-			stop_tokens.append(eos_token_id)
-
-		self._set_generation_stopping_tokens(stop_tokens)
-		self.stop_token_ids = list(set(self.stop_token_ids))
 
 	def _build_input(
 		self,
@@ -147,51 +120,6 @@ class GPT_OSS(BaseModel):
 			"reasoning_message": reasoning_message
 		}
 
-	def _build_input_for_fine_tune(
-		self,
-		input: GPTOSSInput
-	) -> dict[Literal["partial", "complete"], str]:
-		if not self.tokenizer:
-			raise MissingEssentialProp("Could not find tokenizer.")
-
-		partial = self._build_input(
-			input_text=input["input_text"],
-			developer_message=input["developer_message"],
-			system_message=input["system_message"],
-			reasoning_level=input["reasoning_level"]
-		)
-
-		complete = self._build_input(
-			input_text=input["input_text"],
-			developer_message=input["developer_message"],
-			expected_answer=input["expected_answer"],
-			reasoning_message=input["developer_message"],
-			system_message=input["system_message"],
-			reasoning_level=input["reasoning_level"]
-		)
-
-		return {
-			"partial": partial,
-			"complete": complete
-		}
-
-	def _promptfy_dataset_for_dapt(
-		self,
-		dataset: list[GPTOSSInput]
-	) -> list[str]:
-		output = []
-		for data in dataset:
-			complete_input = self._build_input(
-				input_text=data["input_text"],
-				developer_message=data.get("developer_message", None),
-				expected_answer=data.get("expected_answer", None),
-				reasoning_message=data.get("reasoning_message", None),
-				system_message=data.get("system_message", None)
-			)
-			output.append(complete_input)
-
-		return output
-
 	def set_reasoning_level(
 		self,
 		level: Literal["Low", "Medium", "High"]
@@ -201,21 +129,11 @@ class GPT_OSS(BaseModel):
 	def generate(
 		self,
 		input: GPTOSSInput | str,
-		params: GenerationParams | None = None,
-		target: Literal["model", "adapter"] = "model"
+		params: GenerationParams | None = None
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
 			self._log("Model or Tokenizer missing", "WARNING")
 			return None
-
-		if target == "model":
-			model = self.model
-		else:
-			if self.adapter is None:
-				self._log("Adapter missing. Defaulting to model.", "WARNING")
-				model = self.model
-			else:
-				model = self.adapter
 
 		self._log(f"Processing received input...'")
 
@@ -244,8 +162,8 @@ class GPT_OSS(BaseModel):
 
 		input_ids, attention_mask = tokenized_input
 
-		model.eval()
-		model.gradient_checkpointing_disable()
+		self.model.eval()
+		self.model.gradient_checkpointing_disable()
 		start = time()
 
 		with torch.no_grad():
@@ -255,7 +173,7 @@ class GPT_OSS(BaseModel):
 				use_cache=True,
 				eos_token_id=None,
 				streamer=params.streamer,
-				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids, self.tokenizer, self.log_level == "DEBUG")])
+				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 			)
 
 		answer = self.tokenizer.decode(outputs[0])

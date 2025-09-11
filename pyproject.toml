@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llmflow"
-version = "0.4.1"
+version = "0.4.2"
 authors = [
   { name = "Gustavo Henrique", email = "ghfc2000@hotmail.com" }
 ]
@@ -24,7 +24,6 @@ dependencies = [
     "nltk",
     "numpy",
     "pandas",
-    "peft",
     "rouge-score",
     "safetensors",
     "scikit-learn",
@@ -32,8 +31,6 @@ dependencies = [
     "sentence-transformers",
     "tqdm",
     "torch",
-    "torchvision",
-    "torchaudio",
     "transformers",
     "triton",
     "trl",
