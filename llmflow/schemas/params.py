@@ -9,12 +9,14 @@ class TrainParams:
   batch_size: int = 1
   gradient_accumulation: int = 8
   epochs: int = 1
+  warmup_ratio: float = 0.0
   lr: float = 2e-5
   optim: Literal[
     "adamw_torch",
     "adamw_torch_fused",
     "sgd"
   ] = "adamw_torch"
+  logging_steps=1
 
 @dataclass
 class GenerationBeamsParams:

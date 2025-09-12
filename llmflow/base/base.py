@@ -343,11 +343,12 @@ class BaseModel(ABC):
 			num_train_epochs=train_params.epochs,
 			learning_rate=train_params.lr,
 			gradient_accumulation_steps=train_params.gradient_accumulation,
-			warmup_ratio=0.03,
+			warmup_ratio=train_params.warmup_ratio,
 			lr_scheduler_type="cosine_with_min_lr",
 			lr_scheduler_kwargs={"min_lr_rate": 0.1},
+			output_dir=None,
 			save_strategy="no",
-			logging_steps=1
+			logging_steps=train_params.logging_steps
 		)
 
 		if self.seed is not None:
@@ -447,11 +448,12 @@ class BaseModel(ABC):
 			gradient_checkpointing=True,
 			num_train_epochs=train_params.epochs,
 			gradient_accumulation_steps=train_params.gradient_accumulation,
-			warmup_ratio=0.03,
+			warmup_ratio=train_params.warmup_ratio,
 			lr_scheduler_type="cosine_with_min_lr",
 			lr_scheduler_kwargs={"min_lr_rate": 0.1},
+			output_dir=None,
 			save_strategy="no",
-			logging_steps=1
+			logging_steps=train_params.logging_steps
 		)
 
 		if self.seed is not None:
