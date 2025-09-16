@@ -57,6 +57,7 @@ class RAGPipeline:
 		splits = self.splitter.split_documents(docs)
 		split_ids = [f"{ids[0]}_{i}" for i in range(len(splits))]
 		self.vector_store.add_documents(splits, ids=split_ids)
+		self.vector_store.persist()
 	
 	def create(
 		self,
@@ -96,6 +97,7 @@ class RAGPipeline:
 		self, doc_id: str
 	) -> None:
 		self.vector_store.delete(ids=[doc_id])
+		self.vector_store.persist()
 
 	def query(
 		self,
