@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llmflow"
-version = "0.4.5"
+version = "0.4.6"
 authors = [
   { name = "Gustavo Henrique", email = "ghfc2000@hotmail.com" }
 ]
@@ -22,8 +22,10 @@ dependencies = [
     "datasets",
     "evaluate",
     "huggingface-hub",
+    "langchain_community",
     "nltk",
     "numpy",
+    "openai-harmony",
     "pandas",
     "rouge-score",
     "safetensors",

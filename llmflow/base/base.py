@@ -134,8 +134,16 @@ class BaseModel(ABC):
 		self,
 		level: str
 	) -> None:
+		level_map = {
+			"DEBUG": logging.DEBUG,
+			"INFO": logging.INFO,
+			"WARNING": logging.WARNING,
+			"ERROR": logging.ERROR,
+		}
+		numeric_level = level_map.get(level.upper(), logging.INFO)
+	
 		logging.basicConfig(
-			level=level,
+			level=numeric_level,
 			format="%(asctime)s - %(levelname)s - %(message)s"
 		)
 		self.logger = logging.getLogger(__name__)
