@@ -1,10 +1,13 @@
 import textwrap
+import threading
+from functools import partial
 from time import time
-from typing import Literal, TypedDict
+from typing import Any, Generator, Iterator, Literal, TypedDict, cast
 
 import torch
 from openai_harmony import HarmonyEncodingName, load_harmony_encoding
-from transformers import StoppingCriteriaList
+from transformers import (AutoTokenizer, StoppingCriteriaList,
+                          TextIteratorStreamer)
 from transformers.models.gpt_oss import GptOssForCausalLM
 from transformers.utils.quantization_config import Mxfp4Config
 
@@ -172,7 +175,6 @@ class GPT_OSS(BaseModel):
 				attention_mask=attention_mask,
 				use_cache=True,
 				eos_token_id=None,
-				streamer=params.streamer,
 				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 			)
 
@@ -194,3 +196,70 @@ class GPT_OSS(BaseModel):
 			end = len(answer)
 
 		return answer[start:end].strip()
+	
+	def generate_stream(
+		self,
+		input: GPTOSSInput | str,
+		params: GenerationParams | None = None
+	) -> Iterator[str]:
+		if self.model is None or self.tokenizer is None:
+			self._log("Model or Tokenizer missing", "WARNING")
+			if False:
+				yield ""
+			return
+		
+		if params is None:
+			params = GenerationParams(max_new_tokens=32768)
+		elif params.max_new_tokens is None:
+			params.max_new_tokens = 32768
+
+		generation_params = create_generation_params(params)
+		self.model.generation_config = generation_params
+
+		if isinstance(input, str):
+			model_input = self._build_input(
+				input_text=input
+			)
+		else:
+			model_input = self._build_input(
+				input_text=input["input_text"],
+				developer_message=input.get("developer_message"),
+				system_message=input.get("system_message"),
+				reasoning_level=input.get("reasoning_level")
+			)
+		
+		tokenized_input = self._tokenize(model_input)
+		input_ids, attention_mask = tokenized_input
+
+		streamer = TextIteratorStreamer(
+			cast(AutoTokenizer, self.tokenizer),
+			skip_prompt=True,
+			skip_special_tokens=True
+		)
+
+		generate_fn = partial(
+			self.model.generate,
+			input_ids=input_ids,
+			attention_mask=attention_mask,
+			use_cache=True,
+			eos_token_id=None,
+			streamer=streamer,
+			stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+		)
+
+		thread = threading.Thread(target=generate_fn)
+		thread.start()
+
+		done_thinking = False
+		buffer = ""
+
+		for new_text in streamer:
+			buffer += new_text
+
+			if "final" in buffer:
+				done_thinking = True
+				buffer = buffer.split("final", 1)[1]
+			
+			if done_thinking:
+				yield buffer
+				buffer = ""

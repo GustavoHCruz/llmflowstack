@@ -1,9 +1,11 @@
 import textwrap
+import threading
 from time import time
-from typing import Literal, TypedDict
+from typing import Any, Generator, Iterator, Literal, TypedDict, cast
 
 import torch
-from transformers import StoppingCriteriaList
+from transformers import (AutoTokenizer, StoppingCriteriaList,
+                          TextIteratorStreamer)
 from transformers.models.llama import LlamaForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
@@ -138,7 +140,6 @@ class LLaMA3(BaseModel):
 				attention_mask=attention_mask,
 				use_cache=True,
 				eos_token_id=None,
-				streamer=params.streamer,
 				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 			)
 
@@ -150,3 +151,59 @@ class LLaMA3(BaseModel):
 		response = outputs[0][input_ids.shape[1]:]
 
 		return self.tokenizer.decode(response, skip_special_tokens=True)
+	
+	def generate_stream(
+		self,
+		input: LLaMA3Input | str,
+		params: GenerationParams | None = None
+	) -> Iterator[str]:
+		if self.model is None or self.tokenizer is None:
+			self._log("Model or Tokenizer missing", "WARNING")
+			if False:
+				yield ""
+			return
+		
+		if params is None:
+			params = GenerationParams(max_new_tokens=8192)
+		elif params.max_new_tokens is None:
+			params.max_new_tokens = 8192
+
+		generation_params = create_generation_params(params)
+		self.model.generation_config = generation_params
+
+		if isinstance(input, str):
+			model_input = self._build_input(
+				input_text=input
+			)
+		else:
+			model_input = self._build_input(
+				input_text=input["input_text"],
+				system_message=input.get("system_message")
+			)
+		
+		tokenized_input = self._tokenize(model_input)
+		input_ids, attention_mask = tokenized_input
+
+		streamer = TextIteratorStreamer(
+			cast(AutoTokenizer, self.tokenizer),
+			skip_prompt=True,
+			skip_special_tokens=True
+		)
+
+		def _generate() -> None:
+			assert self.model is not None
+			with torch.no_grad():
+				self.model.generate(
+					input_ids=input_ids,
+					attention_mask=attention_mask,
+					use_cache=True,
+					eos_token_id=None,
+					streamer=streamer,
+					stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+				)
+		
+		thread = threading.Thread(target=_generate)
+		thread.start()
+
+		for new_text in streamer:
+			yield new_text

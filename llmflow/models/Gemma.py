@@ -1,9 +1,12 @@
 import textwrap
+import threading
+from functools import partial
 from time import time
-from typing import Literal, TypedDict
+from typing import Iterator, Literal, TypedDict, cast
 
 import torch
-from transformers import StoppingCriteriaList
+from transformers import (AutoTokenizer, StoppingCriteriaList,
+                          TextIteratorStreamer)
 from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
@@ -146,7 +149,6 @@ class Gemma(BaseModel):
 				attention_mask=attention_mask,
 				use_cache=True,
 				eos_token_id=None,
-				streamer=params.streamer,
 				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 			)
 
@@ -157,25 +159,89 @@ class Gemma(BaseModel):
 
 		self._log(f"Response generated in {total_time:.4f} seconds")
 
-		thought = start = answer.find("<unused95>")
-		if self.can_think or thought != -1:
-			start = answer.find("thought")
-			start = answer.find("<unused95>", start)
-
-			if start == -1:
-				start = answer.find("<start_of_turn>model")
-				if start == -1:
-					return ""
-			start = start + len("<unused95>")
-		else:
-			start = answer.find("<start_of_turn>model")
-
-			if start == -1:
-				return ""
+		start = answer.rfind("<unused95>")
+		if start == -1:
+			start = answer.rfind("<start_of_turn>model")
 			start = start + len("<start_of_turn>model")
+		else:
+			start = start + len("<unused95>")
 
 		end = answer.find("<end_of_turn>", start)
 		if end == -1:
 			end = len(answer)
 
 		return answer[start:end].strip().replace("<eos>", "")
+	
+	def generate_stream(
+		self,
+		input: GemmaInput | str,
+		params: GenerationParams | None = None
+	) -> Iterator[str]:
+		if self.model is None or self.tokenizer is None:
+			self._log("Model or Tokenizer missing", "WARNING")
+			if False:
+				yield ""
+			return
+
+		if params is None:
+			params = GenerationParams(max_new_tokens=32768)
+		elif params.max_new_tokens is None:
+			params.max_new_tokens = 32768
+
+		generation_params = create_generation_params(params)
+		self.model.generation_config = generation_params
+
+		if isinstance(input, str):
+			model_input = self._build_input(
+				input_text=input
+			)
+		else:
+			model_input = self._build_input(
+				input_text=input["input_text"],
+				system_message=input.get("system_message")
+			)
+		
+		tokenized_input = self._tokenize(model_input)
+		input_ids, attention_mask = tokenized_input
+
+		streamer = TextIteratorStreamer(
+			cast(AutoTokenizer, self.tokenizer),
+			skip_prompt=True,
+			skip_special_tokens=True
+		)
+
+		generate_fn = partial(
+			self.model.generate,
+			input_ids=input_ids,
+			attention_mask=attention_mask,
+			use_cache=True,
+			eos_token_id=None,
+			streamer=streamer,
+			stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+		)
+
+		thread = threading.Thread(target=generate_fn)
+		thread.start()
+
+		buffer = ""
+		is_thinking = None
+		
+		for new_text in streamer:
+			buffer += new_text
+
+			if is_thinking is None:
+				if len(buffer.split()) > 5:
+					is_thinking = False
+					continue
+
+				lower_buffer = buffer.lower()
+				if lower_buffer.find("thought") != -1 or lower_buffer.find("<unused94>") != -1:
+					is_thinking = True
+					continue
+			elif not is_thinking:
+				yield buffer
+				buffer = "" 
+			else:
+				if buffer.find("<unused95>") != -1:
+					is_thinking = False
+					buffer = buffer.split("<unused95>", 1)[1]
