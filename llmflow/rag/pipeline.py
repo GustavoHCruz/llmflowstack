@@ -102,8 +102,14 @@ class RAGPipeline:
 	def query(
 		self,
 		query: str,
-		k: int = 4
+		k: int = 4,
+		category: str | None = None
 	) -> str:
-		docs = self.vector_store.similarity_search(query, k=k)
+		if category:
+			docs = self.vector_store.similarity_search(
+				query, k=k, filter={"category": category}
+			)
+		else:
+			docs = self.vector_store.similarity_search(query, k=k)
 
 		return "\n\n".join(doc.page_content for doc in docs)

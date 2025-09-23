@@ -76,9 +76,9 @@ class Gemma(BaseModel):
 			system_message += f"think silently if needed. {system_message}"
 
 		if system_message:
-			system_message = f"SYSTEM INSTRUCTION: {system_message}."
+			system_message = f"{system_message}\n"
 
-		answer = f"{expected_answer}{self.tokenizer.eos_token}<eos><end_of_turn>" if expected_answer else ""
+		answer = f"{expected_answer}<end_of_turn>" if expected_answer else ""
 	
 		return textwrap.dedent(
 			f"<bos><start_of_turn>user\n"
