@@ -12,6 +12,27 @@ It provides:
 
 The goal is to make experimentation with LLMs more accessible, without the need to build complex infrastructure from scratch.
 
+## Supported Models
+
+This framework is designed to provide flexibility when working with different open-source and commercial LLMs. Currently, the following models are supported:
+
+- **GPT-OSS**
+
+  - `GPT-OSS 20B`
+  - `GPT-OSS 120B`
+
+- **LLaMA**
+
+  - `LLaMA 3.1 8B - Instruct`
+  - `LLaMA 3.1 70B - Instruct`
+  - `LLaMA 3.3 70B - Instruct`
+  - `LLaMA 3.3 405B - Instruct`
+
+- **Gemma**
+  - `Gemma 27B Text-It`
+
+> Compatibility includes both inference and training (Domain-Adaptive Pre-Training — DAPT — and Supervised Fine-Tuning)
+
 ---
 
 ## Installation
@@ -111,7 +132,7 @@ dataset.append(model.build_input(
 # Does the DAPT in the full model
 model.dapt(
   train_dataset=dataset,
-  train_params=TrainParams(
+  params=TrainParams(
     batch_size=1,
     epochs=3,
     gradient_accumulation=1,
@@ -122,7 +143,7 @@ model.dapt(
 # Does the fine-tune this time
 model.fine_tune(
   train_dataset=dataset,
-  train_params=TrainParams(
+  params=TrainParams(
     batch_size=1,
     gradient_accumulation=1,
     lr=2e-5,

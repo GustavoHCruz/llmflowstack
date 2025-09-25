@@ -218,6 +218,14 @@ class BaseModel(ABC):
 	) -> None:
 		pass
 
+	@abstractmethod
+	def _build_input(
+		self,
+		*args: Any,
+		**kwargs: Any
+	) -> str:
+		pass
+
 	def _tokenize(
 		self,
 		input_text: str
@@ -267,6 +275,85 @@ class BaseModel(ABC):
 				})
 		return Dataset.from_list(tokenized)
 
+	def _promptfy_dataset_for_dapt(
+		self,
+		dataset: list[dict[str, str | None]]
+	) -> list[str]:
+		output = []
+		for data in dataset:
+			complete_input = self._build_input(
+				**{field: data.get(field) for field in self.question_fields + self.answer_fields}
+			)
+			output.append(complete_input)
+
+		return output
+
+	def dapt(
+		self,
+		train_dataset: list[Any],
+		params: TrainParams | None = None,
+		eval_dataset: list[Any] | None = None,
+		save_at_end = True,
+		save_path: str | None = None
+	) -> None:
+		if not self.model:
+			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
+			return None
+		if not self.tokenizer:
+			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
+			return None
+
+		self._log("Starting DAPT")
+
+		if self.model_is_quantized:
+			self._log("Cannot DAPT a quantized model.", "WARNING")
+			return None
+		
+		if params is None:
+			params = TrainParams()
+
+		training_arguments = SFTConfig(
+			num_train_epochs=params.epochs,
+			learning_rate=params.lr,
+			gradient_accumulation_steps=params.gradient_accumulation,
+			warmup_ratio=params.warmup_ratio,
+			lr_scheduler_type="cosine_with_min_lr",
+			lr_scheduler_kwargs={"min_lr_rate": 0.1},
+			output_dir=None,
+			save_strategy="no",
+			logging_steps=params.logging_steps
+		)
+
+		if self.seed is not None:
+			training_arguments.seed = self.seed
+
+		processed_train_dataset = self._promptfy_dataset_for_dapt(train_dataset)
+		tokenized_train_dataset = self._tokenize_dataset_for_dapt(processed_train_dataset)
+
+		tokenized_eval_dataset = None
+		if eval_dataset:
+			processed_eval_dataset = self._promptfy_dataset_for_dapt(eval_dataset)
+			tokenized_eval_dataset = self._tokenize_dataset_for_dapt(processed_eval_dataset)
+
+		log_callback = LogCollectorCallback()
+
+		trainer = SFTTrainer(
+			model=self.model,
+			train_dataset=tokenized_train_dataset,
+			eval_dataset=tokenized_eval_dataset,
+			args=training_arguments,
+			callbacks=[log_callback]
+		)
+
+		trainer.train()
+
+		if save_at_end and save_path:
+			self.save_checkpoint(
+				path=save_path
+			)
+
+		self._log("Finished DAPT")
+
 	def _tokenize_for_fine_tune(
 		self,
 		input_text: str,
@@ -313,94 +400,6 @@ class BaseModel(ABC):
 			})
 		return Dataset.from_list(tokenized)
 
-	def _promptfy_dataset_for_dapt(
-		self,
-		dataset: list[dict[str, str | None]]
-	) -> list[str]:
-		output = []
-		for data in dataset:
-			complete_input = self._build_input(
-				**{field: data.get(field) for field in self.answer_fields}
-			)
-			output.append(complete_input)
-
-		return output
-
-	def dapt(
-		self,
-		train_params: TrainParams,
-		train_dataset: list[Any],
-		eval_dataset: list[Any] | None = None,
-		save_at_end = True,
-		save_path: str | None = None
-	) -> None:
-		if not self.model:
-			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
-			return
-		if not self.tokenizer:
-			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
-			return
-
-		self._log("Starting DAPT")
-
-		if self.model_is_quantized:
-			self._log("Cannot DAPT a quantized model.", "WARNING")
-			return None
-
-		training_arguments = SFTConfig(
-			num_train_epochs=train_params.epochs,
-			learning_rate=train_params.lr,
-			gradient_accumulation_steps=train_params.gradient_accumulation,
-			warmup_ratio=train_params.warmup_ratio,
-			lr_scheduler_type="cosine_with_min_lr",
-			lr_scheduler_kwargs={"min_lr_rate": 0.1},
-			output_dir=None,
-			save_strategy="no",
-			logging_steps=train_params.logging_steps
-		)
-
-		if self.seed is not None:
-			training_arguments.seed = self.seed
-
-		model = self.model
-
-		processed_train_dataset = self._promptfy_dataset_for_dapt(train_dataset)
-		tokenized_train_dataset = self._tokenize_dataset_for_dapt(processed_train_dataset)
-
-		tokenized_eval_dataset = None
-		if eval_dataset:
-			processed_eval_dataset = self._promptfy_dataset_for_dapt(eval_dataset)
-			tokenized_eval_dataset = self._tokenize_dataset_for_dapt(processed_eval_dataset)
-
-		log_callback = LogCollectorCallback()
-
-		trainer = SFTTrainer(
-			model=model,
-			train_dataset=tokenized_train_dataset,
-			eval_dataset=tokenized_eval_dataset,
-			args=training_arguments,
-			callbacks=[log_callback]
-		)
-
-		trainer.train()
-
-		if save_at_end and save_path:
-			self.save_checkpoint(
-				path=save_path
-			)
-
-		self.model = model
-
-		self._log("Finished DAPT")
-
-	@abstractmethod
-	def _build_input(
-		self,
-		*args: Any,
-		**kwargs: Any
-	) -> str:
-		pass
-
 	def _build_input_for_fine_tune(
 		self,
 		input: dict
@@ -432,36 +431,39 @@ class BaseModel(ABC):
 
 	def fine_tune(
 		self,
-		train_params: TrainParams,
 		train_dataset: list[Any],
+		params: TrainParams | None = None,
 		eval_dataset: list[Any] | None = None,
 		save_at_end = True,
 		save_path: str | None = None
 	) -> None:
 		if not self.model:
 			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
-			return
+			return None
 		if not self.tokenizer:
 			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
-			return
+			return None
 
 		self._log("Starting fine-tune")
 
 		if self.model_is_quantized:
 			self._log("Cannot fine-tune a quantized model.", "WARNING")
 			return None
+		
+		if params is None:
+			params = TrainParams()
 
 		training_arguments = SFTConfig(
-			learning_rate=train_params.lr,
+			learning_rate=params.lr,
 			gradient_checkpointing=True,
-			num_train_epochs=train_params.epochs,
-			gradient_accumulation_steps=train_params.gradient_accumulation,
-			warmup_ratio=train_params.warmup_ratio,
+			num_train_epochs=params.epochs,
+			gradient_accumulation_steps=params.gradient_accumulation,
+			warmup_ratio=params.warmup_ratio,
 			lr_scheduler_type="cosine_with_min_lr",
 			lr_scheduler_kwargs={"min_lr_rate": 0.1},
 			output_dir=None,
 			save_strategy="no",
-			logging_steps=train_params.logging_steps
+			logging_steps=params.logging_steps
 		)
 
 		if self.seed is not None:
