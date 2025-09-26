@@ -81,7 +81,7 @@ class Gemma(BaseModel):
 		answer = f"{expected_answer}<end_of_turn>" if expected_answer else ""
 	
 		return textwrap.dedent(
-			f"<bos><start_of_turn>user\n"
+			f"<start_of_turn>user"
 			f"{system_message}\n{input_text}<end_of_turn>\n"
 			f"<start_of_turn>model\n"
 			f"{answer}"

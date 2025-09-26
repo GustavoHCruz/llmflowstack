@@ -1,5 +1,5 @@
 import torch
-from transformers import PreTrainedTokenizerBase, StoppingCriteria
+from transformers import StoppingCriteria
 
 
 class StopOnToken(StoppingCriteria):
