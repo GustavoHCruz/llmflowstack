@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llmflow"
-version = "0.4.8"
+version = "0.4.9"
 authors = [
   { name = "Gustavo Henrique", email = "ghfc2000@hotmail.com" }
 ]
