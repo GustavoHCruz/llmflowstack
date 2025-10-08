@@ -18,18 +18,18 @@ This framework is designed to provide flexibility when working with different op
 
 - **GPT-OSS**
 
-  - `GPT-OSS 20B`
-  - `GPT-OSS 120B`
+  - [`GPT-OSS 20B`](https://huggingface.co/openai/gpt-oss-20b)
+  - [`GPT-OSS 120B`](https://huggingface.co/openai/gpt-oss-120b)
 
 - **LLaMA**
 
-  - `LLaMA 3.1 8B - Instruct`
-  - `LLaMA 3.1 70B - Instruct`
-  - `LLaMA 3.3 70B - Instruct`
-  - `LLaMA 3.3 405B - Instruct`
+  - [`LLaMA 3.1 8B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)
+  - [`LLaMA 3.1 70B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)
+  - [`LLaMA 3.3 70B - Instruct`](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct)
+  - [`LLaMA 3.3 405B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct)
 
 - **Gemma**
-  - `Gemma 27B Text-It`
+  - [`MedGemma 27B Text - It`](https://huggingface.co/google/medgemma-27b-text-it)
 
 > Compatibility includes both inference and training (Domain-Adaptive Pre-Training — DAPT — and Supervised Fine-Tuning)
 
@@ -37,12 +37,10 @@ This framework is designed to provide flexibility when working with different op
 
 ## Installation
 
-You can install it directly from the local repository:
+You can install the package directly from [PyPI](https://pypi.org/project/llmflow/):
 
 ```bash
-git clone <REPOSITORY_URL>
-cd llmflow
-pip install .
+pip install llmflow
 ```
 
 ## Usage

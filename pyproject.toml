@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llmflow"
-version = "0.4.9"
+version = "1.0.0"
 authors = [
-  { name = "Gustavo Henrique", email = "ghfc2000@hotmail.com" }
+  { name = "Gustavo Henrique Ferreira Cruz", email = "gustavohferreiracruz@gmail.com" }
 ]
 description = "LLMFlow is a framework for training and using LLMs (LLaMA, GPT-OSS, Gemma). Supports DAPT, fine-tuning, and distributed inference. Public fork without institution-specific components."
 readme = "README.md"

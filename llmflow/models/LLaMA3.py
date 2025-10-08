@@ -1,7 +1,7 @@
 import textwrap
 import threading
 from time import time
-from typing import Any, Generator, Iterator, Literal, TypedDict, cast
+from typing import Iterator, Literal, TypedDict, cast
 
 import torch
 from transformers import (AutoTokenizer, StoppingCriteriaList,
@@ -72,7 +72,11 @@ class LLaMA3(BaseModel):
 
 		answer = f"{expected_answer}{self.tokenizer.eos_token}" if expected_answer else ""
 
-		return textwrap.dedent(f"""<|start_header_id|>system<|end_header_id|>{system_message or ""}\n<|eot_id|><|start_header_id|>user<|end_header_id|>{input_text}\n<|eot_id|><|start_header_id|>assistant<|end_header_id|>{answer}""")
+		return textwrap.dedent(
+			f"<|start_header_id|>system<|end_header_id|>{system_message or ""}\n"
+			f"<|eot_id|><|start_header_id|>user<|end_header_id|>{input_text}\n"
+			f"<|eot_id|><|start_header_id|>assistant<|end_header_id|>{answer}"
+		)
 
 	def build_input(
 		self,
