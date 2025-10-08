@@ -1,8 +1,8 @@
-# LLMFlow
+# LLMFlowStack
 
-**LLMFlow** is a lightweight framework designed to simplify the use of LLMs (LLaMA, GPT-OSS, and Gemma) for NLP tasks.
+**LLMFlowStack** is a lightweight framework designed to simplify the use of LLMs (LLaMA, GPT-OSS, and Gemma) for NLP tasks.
 
-> **Note:** LLMFlow is intended for high-performance machines with **one or more NVIDIA H100 GPUs**.
+> **Note:** LLMFlowStack is intended for high-performance machines with **one or more NVIDIA H100 GPUs**.
 
 It provides:
 
@@ -37,10 +37,10 @@ This framework is designed to provide flexibility when working with different op
 
 ## Installation
 
-You can install the package directly from [PyPI](https://pypi.org/project/llmflow/):
+You can install the package directly from [PyPI](https://pypi.org/project/llmflowstack/):
 
 ```bash
-pip install llmflow
+pip install llmflowstack
 ```
 
 ## Usage
@@ -52,7 +52,7 @@ This section presents a bit of what you can do with the framework.
 You can load as many models as your hardware allows (H100 GPU recommended)...
 
 ```python
-from llmflow import GPT_OSS, LLaMA3
+from llmflowstack import GPT_OSS, LLaMA3
 
 # Loading a LLaMA model
 first_model = LLaMA3()
@@ -108,8 +108,8 @@ thrid_model = GPT_OSS(
 ### Training Examples (DAPT & Fine-tune)
 
 ```python
-from llmflow import LLaMA3
-from llmflow.schemas import TrainParams
+from llmflowstack import LLaMA3
+from llmflowstack.schemas import TrainParams
 
 model = LLaMA3(
   checkpoint="llama-3.1-8b-Instruct"
@@ -161,8 +161,8 @@ model.save_checkpoint(
 ### NLP Evaluation
 
 ```python
-> from llmflow import text_evaluation
-> from llmflow.utils import (bert_score_evaluation, cosine_similarity_evaluation, rouge_evaluation)
+> from llmflowstack import text_evaluation
+> from llmflowstack.utils import (bert_score_evaluation, cosine_similarity_evaluation, rouge_evaluation)
 
 # Predictions from some model
 > predictions = ["Chico is a dog, and he is orange!", "Fred is a cat, and he is white!"]
