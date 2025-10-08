@@ -11,11 +11,11 @@ from transformers import (AutoTokenizer, StoppingCriteriaList,
 from transformers.models.gpt_oss import GptOssForCausalLM
 from transformers.utils.quantization_config import Mxfp4Config
 
-from llmflow.base.base import BaseModel
-from llmflow.callbacks.stop_on_token import StopOnToken
-from llmflow.schemas.params import GenerationParams
-from llmflow.utils.exceptions import MissingEssentialProp
-from llmflow.utils.generation_utils import create_generation_params
+from llmflowstack.base.base import BaseModel
+from llmflowstack.callbacks.stop_on_token import StopOnToken
+from llmflowstack.schemas.params import GenerationParams
+from llmflowstack.utils.exceptions import MissingEssentialProp
+from llmflowstack.utils.generation_utils import create_generation_params
 
 
 class GPTOSSInput(TypedDict):

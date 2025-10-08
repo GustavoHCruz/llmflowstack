@@ -16,9 +16,9 @@ from transformers.tokenization_utils_base import BatchEncoding
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
-from llmflow.callbacks.log_collector import LogCollectorCallback
-from llmflow.schemas.params import GenerationParams, TrainParams
-from llmflow.utils.exceptions import MissingEssentialProp
+from llmflowstack.callbacks.log_collector import LogCollectorCallback
+from llmflowstack.schemas.params import GenerationParams, TrainParams
+from llmflowstack.utils.exceptions import MissingEssentialProp
 
 
 class BaseModel(ABC):

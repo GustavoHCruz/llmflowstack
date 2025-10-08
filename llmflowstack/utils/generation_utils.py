@@ -1,6 +1,6 @@
 from transformers.generation.configuration_utils import GenerationConfig
 
-from llmflow.schemas.params import GenerationParams
+from llmflowstack.schemas.params import GenerationParams
 
 
 def create_generation_params(generation_configs: GenerationParams) -> GenerationConfig:

@@ -3,12 +3,12 @@ requires = ["hatchling >= 1.26"]
 build-backend = "hatchling.build"
 
 [project]
-name = "llmflow"
+name = "llmflowstack"
 version = "1.0.0"
 authors = [
   { name = "Gustavo Henrique Ferreira Cruz", email = "gustavohferreiracruz@gmail.com" }
 ]
-description = "LLMFlow is a framework for training and using LLMs (LLaMA, GPT-OSS, Gemma). Supports DAPT, fine-tuning, and distributed inference. Public fork without institution-specific components."
+description = "LLMFlowStack is a framework for training and using LLMs (LLaMA, GPT-OSS, Gemma). Supports DAPT, fine-tuning, and distributed inference. Public fork without institution-specific components."
 readme = "README.md"
 requires-python = ">=3.13"
 license = {text = "MIT"}
