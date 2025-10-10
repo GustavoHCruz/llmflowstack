@@ -223,7 +223,7 @@ class BaseModel(ABC):
 		self,
 		*args: Any,
 		**kwargs: Any
-	) -> str:
+	) -> str | BatchEncoding:
 		pass
 
 	def _tokenize(
@@ -282,7 +282,7 @@ class BaseModel(ABC):
 		output = []
 		for data in dataset:
 			complete_input = self._build_input(
-				**{field: data.get(field) for field in self.question_fields + self.answer_fields}
+				data
 			)
 			output.append(complete_input)
 
@@ -403,7 +403,7 @@ class BaseModel(ABC):
 	def _build_input_for_fine_tune(
 		self,
 		input: dict
-	) -> dict[Literal["partial", "complete"], str]:
+	) -> dict[Literal["partial", "complete"], str | BatchEncoding]:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 

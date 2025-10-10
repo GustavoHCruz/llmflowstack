@@ -63,18 +63,19 @@ class LLaMA3(BaseModel):
 
 	def _build_input(
 		self,
-		input_text: str,
-		expected_answer: str | None = None,
-		system_message: str | None = None
+		data: LLaMA3Input
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
+		expected_answer = data.get("expected_answer")
 		answer = f"{expected_answer}{self.tokenizer.eos_token}" if expected_answer else ""
 
+		system_message = data.get("system_message", "")
+
 		return textwrap.dedent(
-			f"<|start_header_id|>system<|end_header_id|>{system_message or ""}\n"
-			f"<|eot_id|><|start_header_id|>user<|end_header_id|>{input_text}\n"
+			f"<|start_header_id|>system<|end_header_id|>{system_message}\n"
+			f"<|eot_id|><|start_header_id|>user<|end_header_id|>{data["input_text"]}\n"
 			f"<|eot_id|><|start_header_id|>assistant<|end_header_id|>{answer}"
 		)
 
@@ -120,13 +121,15 @@ class LLaMA3(BaseModel):
 
 		model_input = None
 		if isinstance(input, str):
-			model_input = self._build_input(
+			model_input = self.build_input(
 				input_text=input
+			)
+			model_input = self._build_input(
+				data=model_input
 			)
 		else:
 			model_input = self._build_input(
-				input_text=input["input_text"],
-				system_message=input.get("system_message", "")
+				data=input
 			)
 
 		tokenized_input = self._tokenize(model_input)
@@ -175,14 +178,17 @@ class LLaMA3(BaseModel):
 		generation_params = create_generation_params(params)
 		self.model.generation_config = generation_params
 
+		model_input = None
 		if isinstance(input, str):
-			model_input = self._build_input(
+			model_input = self.build_input(
 				input_text=input
+			)
+			model_input = self._build_input(
+				data=model_input
 			)
 		else:
 			model_input = self._build_input(
-				input_text=input["input_text"],
-				system_message=input.get("system_message")
+				data=input
 			)
 		
 		tokenized_input = self._tokenize(model_input)

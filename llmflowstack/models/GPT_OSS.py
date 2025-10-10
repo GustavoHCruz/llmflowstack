@@ -2,7 +2,7 @@ import textwrap
 import threading
 from functools import partial
 from time import time
-from typing import Any, Generator, Iterator, Literal, TypedDict, cast
+from typing import Iterator, Literal, TypedDict, cast
 
 import torch
 from openai_harmony import HarmonyEncodingName, load_harmony_encoding
@@ -73,34 +73,33 @@ class GPT_OSS(BaseModel):
 
 	def _build_input(
 		self,
-		input_text: str,
-		expected_answer: str | None = None,
-		system_message: str | None = None,
-		reasoning_level: Literal["Low", "Medium", "High"] | None = None,
-		reasoning_message: str | None = None,
-		developer_message: str | None = None
+		data: GPTOSSInput
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		reasoning = reasoning_level
+		reasoning = data.get("reasoning_level")
 		if reasoning is None:
 			reasoning = self.reasoning_level
 
-		system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\nReasoning: {reasoning}\n\n{system_message or ""}# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|>"
+		system_message = data.get("system_message", "")
+		system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\nReasoning: {reasoning}\n\n{system_message}# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|>"
 
 		developer_text = ""
+		developer_message = data.get("developer_message", "")
 		if developer_message:
-			developer_text = f"<|start|>developer<|message|># Instructions\n\n{developer_message or ""}<|end|>"
+			developer_text = f"<|start|>developer<|message|># Instructions\n\n{developer_message}<|end|>"
 
 		assistant_text = ""
+		reasoning_message = data.get("reasoning_message", "")
 		if reasoning_message:
 			assistant_text += f"<|start|>assistant<|channel|>analysis<|message|>{reasoning_message}<|end|>"
 
+		expected_answer = data.get("expected_answer", "")
 		if expected_answer:
 			assistant_text += f"<|start|>assistant<|channel|>final<|message|>{expected_answer}<|return|>"
 
-		return textwrap.dedent(f"""{system_text}{developer_text}<|start|>user<|message|>{input_text}<|end|>{assistant_text}""")
+		return textwrap.dedent(f"""{system_text}{developer_text}<|start|>user<|message|>{data["input_text"]}<|end|>{assistant_text}""")
 
 	def build_input(
 		self,
@@ -150,15 +149,15 @@ class GPT_OSS(BaseModel):
 
 		model_input = None
 		if isinstance(input, str):
-			model_input = self._build_input(
+			model_input = self.build_input(
 				input_text=input
+			)
+			model_input = self._build_input(
+				data=model_input
 			)
 		else:
 			model_input = self._build_input(
-				input_text=input["input_text"],
-				developer_message=input.get("developer_message", None),
-				system_message=input.get("system_message", None),
-				reasoning_level=input.get("reasoning_level", None)
+				data=input
 			)
 
 		tokenized_input = self._tokenize(model_input)
@@ -217,15 +216,15 @@ class GPT_OSS(BaseModel):
 		self.model.generation_config = generation_params
 
 		if isinstance(input, str):
-			model_input = self._build_input(
+			model_input = self.build_input(
 				input_text=input
+			)
+			model_input = self._build_input(
+				data=model_input
 			)
 		else:
 			model_input = self._build_input(
-				input_text=input["input_text"],
-				developer_message=input.get("developer_message"),
-				system_message=input.get("system_message"),
-				reasoning_level=input.get("reasoning_level")
+				data=input
 			)
 		
 		tokenized_input = self._tokenize(model_input)

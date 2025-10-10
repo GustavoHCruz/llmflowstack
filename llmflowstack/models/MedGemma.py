@@ -17,12 +17,12 @@ from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.generation_utils import create_generation_params
 
 
-class GemmaInput(TypedDict):
+class MedGemmaInput(TypedDict):
 	input_text: str
 	expected_answer: str | None
 	system_message: str | None
 
-class Gemma(BaseModel):
+class MedGemma(BaseModel):
 	model: Gemma3ForCausalLM | None = None
 	can_think = False
 	question_fields = ["input_text", "system_message"]
@@ -63,13 +63,12 @@ class Gemma(BaseModel):
 
 	def _build_input(
 		self,
-		input_text: str,
-		expected_answer: str | None = None,
-		system_message: str | None = None
+		data: MedGemmaInput
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
+		system_message = data.get("system_message", "")
 		if not system_message:
 			system_message = ""
 		if self.can_think:
@@ -78,11 +77,12 @@ class Gemma(BaseModel):
 		if system_message:
 			system_message = f"{system_message}\n"
 
+		expected_answer = data.get("expected_answer")
 		answer = f"{expected_answer}<end_of_turn>" if expected_answer else ""
 	
 		return textwrap.dedent(
 			f"<start_of_turn>user"
-			f"{system_message}\n{input_text}<end_of_turn>\n"
+			f"{system_message}\n{data["input_text"]}<end_of_turn>\n"
 			f"<start_of_turn>model\n"
 			f"{answer}"
 		)
@@ -92,7 +92,7 @@ class Gemma(BaseModel):
 		input_text: str,
 		expected_answer: str | None = None,
 		system_message: str | None = None
-	) -> GemmaInput:
+	) -> MedGemmaInput:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
@@ -107,7 +107,7 @@ class Gemma(BaseModel):
 
 	def generate(
 		self,
-		input: GemmaInput | str,
+		input: MedGemmaInput | str,
 		params: GenerationParams | None = None,
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
@@ -126,13 +126,15 @@ class Gemma(BaseModel):
 
 		model_input = None
 		if isinstance(input, str):
-			model_input = self._build_input(
+			model_input = self.build_input(
 				input_text=input
+			)
+			model_input = self._build_input(
+				data=model_input
 			)
 		else:
 			model_input = self._build_input(
-				input_text=input["input_text"],
-				system_message=input["system_message"]
+				data=input
 			)
 
 		tokenized_input = self._tokenize(model_input)
@@ -174,7 +176,7 @@ class Gemma(BaseModel):
 	
 	def generate_stream(
 		self,
-		input: GemmaInput | str,
+		input: MedGemmaInput | str,
 		params: GenerationParams | None = None
 	) -> Iterator[str]:
 		if self.model is None or self.tokenizer is None:
@@ -191,14 +193,17 @@ class Gemma(BaseModel):
 		generation_params = create_generation_params(params)
 		self.model.generation_config = generation_params
 
+		model_input = None
 		if isinstance(input, str):
-			model_input = self._build_input(
+			model_input = self.build_input(
 				input_text=input
+			)
+			model_input = self._build_input(
+				data=model_input
 			)
 		else:
 			model_input = self._build_input(
-				input_text=input["input_text"],
-				system_message=input.get("system_message")
+				data=input
 			)
 		
 		tokenized_input = self._tokenize(model_input)
