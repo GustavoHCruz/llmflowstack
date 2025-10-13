@@ -407,9 +407,12 @@ class BaseModel(ABC):
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		partial = self._build_input(**{k: input[k] for k in self.question_fields if k in input})
+		partial = self._build_input({
+			**input,
+			"expected_answer": None
+		})
 
-		complete = self._build_input(**{k: input[k] for k in self.question_fields + self.answer_fields if k in input})
+		complete = self._build_input(input)
 
 		return {
 			"partial": partial,

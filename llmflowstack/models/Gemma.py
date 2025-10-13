@@ -1,30 +1,31 @@
-import textwrap
 import threading
 from functools import partial
 from time import time
 from typing import Iterator, Literal, TypedDict, cast
 
 import torch
-from transformers import (AutoTokenizer, StoppingCriteriaList,
-                          TextIteratorStreamer)
+from transformers import (AutoTokenizer, DataCollatorForLanguageModeling,
+                          StoppingCriteriaList, TextIteratorStreamer, Trainer,
+                          TrainingArguments)
 from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
 from llmflowstack.base.base import BaseModel
+from llmflowstack.callbacks.log_collector import LogCollectorCallback
 from llmflowstack.callbacks.stop_on_token import StopOnToken
-from llmflowstack.schemas.params import GenerationParams
+from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.generation_utils import create_generation_params
 
 
-class MedGemmaInput(TypedDict):
+class Gemma3Input(TypedDict):
 	input_text: str
 	expected_answer: str | None
 	system_message: str | None
+	image_paths: list[str] | None
 
-class MedGemma(BaseModel):
+class Gemma3(BaseModel):
 	model: Gemma3ForCausalLM | None = None
-	can_think = False
 	question_fields = ["input_text", "system_message"]
 	answer_fields = ["expected_answer"]
 
@@ -37,7 +38,7 @@ class MedGemma(BaseModel):
 			return None
 		particular_tokens = self.tokenizer.encode("<end_of_turn>")
 		self.stop_token_ids = tokens + particular_tokens
-	
+
 	def _load_model(
 		self,
 		checkpoint: str,
@@ -48,10 +49,12 @@ class MedGemma(BaseModel):
 			quantization_config = BitsAndBytesConfig(
 				load_in_4bit=True
 			)
+			self.model_is_quantized = True
 		if quantization == "8bit":
 			quantization_config = BitsAndBytesConfig(
 				load_in_8bit=True
 			)
+			self.model_is_quantized = True
 
 		self.model = Gemma3ForCausalLM.from_pretrained(
 			checkpoint,
@@ -63,7 +66,7 @@ class MedGemma(BaseModel):
 
 	def _build_input(
 		self,
-		data: MedGemmaInput
+		data: Gemma3Input
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
@@ -71,8 +74,6 @@ class MedGemma(BaseModel):
 		system_message = data.get("system_message", "")
 		if not system_message:
 			system_message = ""
-		if self.can_think:
-			system_message += f"think silently if needed. {system_message}"
 
 		if system_message:
 			system_message = f"{system_message}\n"
@@ -90,24 +91,107 @@ class MedGemma(BaseModel):
 	def build_input(
 		self,
 		input_text: str,
+		system_message: str | None = None,
 		expected_answer: str | None = None,
-		system_message: str | None = None
-	) -> MedGemmaInput:
+		image_paths: list[str] | None = None
+	) -> Gemma3Input:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
 		return {
 			"input_text": input_text,
+			"system_message": system_message,
 			"expected_answer": expected_answer,
-			"system_message": system_message
+			"image_paths": image_paths
 		}
+	
+	def dapt(
+		self,
+		train_dataset: list,
+		params: TrainParams | None = None,
+		eval_dataset: list | None = None,
+		save_at_end = True,
+		save_path: str | None = None
+	) -> None:
+		if not self.model:
+			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
+			return None
+		if not self.tokenizer:
+			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
+			return None
 
-	def set_can_think(self, value: bool) -> None:
-		self.can_think = value
+		self._log("Starting Training")
+
+		if self.model_is_quantized:
+			self._log("Cannot traub a quantized model.", "WARNING")
+			return None
+		
+		if params is None:
+			params = TrainParams()
+
+		training_arguments = TrainingArguments(
+			num_train_epochs=params.epochs,
+			learning_rate=params.lr,
+			gradient_accumulation_steps=params.gradient_accumulation,
+			warmup_ratio=params.warmup_ratio,
+			lr_scheduler_type="cosine_with_min_lr",
+			lr_scheduler_kwargs={"min_lr_rate": 0.1},
+			output_dir=None,
+			save_strategy="no",
+			logging_steps=params.logging_steps
+		)
+
+		if self.seed is not None:
+			training_arguments.seed = self.seed
+
+		processed_train_dataset = self._promptfy_dataset_for_dapt(train_dataset)
+		tokenized_train_dataset = self._tokenize_dataset_for_dapt(processed_train_dataset)
+
+		tokenized_eval_dataset = None
+		if eval_dataset:
+			processed_eval_dataset = self._promptfy_dataset_for_dapt(eval_dataset)
+			tokenized_eval_dataset = self._tokenize_dataset_for_dapt(processed_eval_dataset)
+
+		log_callback = LogCollectorCallback()
+
+		trainer = Trainer(
+			model=self.model,
+			train_dataset=tokenized_train_dataset,
+			eval_dataset=tokenized_eval_dataset,
+			args=training_arguments,
+			callbacks=[log_callback],
+			data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False)
+		)
+
+		trainer.train()
+
+		if save_at_end and save_path:
+			self.save_checkpoint(
+				path=save_path
+			)
+
+		self._log("Finished Training")
+	
+	def fine_tune(
+		self,
+		train_dataset: list,
+		params: TrainParams | None = None,
+		eval_dataset: list | None = None,
+		save_at_end = True,
+		save_path: str | None = None
+	) -> None:
+		self._log("Only 'dapt' method is available for this class. Redirecting call to it.", "WARNING")
+		return self.dapt(
+			train_dataset=train_dataset,
+			params=params,
+			eval_dataset=eval_dataset,
+			save_at_end=save_at_end,
+			save_path=save_path
+		)
 
 	def generate(
 		self,
-		input: MedGemmaInput | str,
+		input: Gemma3Input | str,
 		params: GenerationParams | None = None,
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
@@ -153,29 +237,18 @@ class MedGemma(BaseModel):
 				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 			)
 
-		answer = self.tokenizer.decode(outputs[0])
-
 		end = time()
 		total_time = end - start
 
 		self._log(f"Response generated in {total_time:.4f} seconds")
 
-		start = answer.rfind("<unused95>")
-		if start == -1:
-			start = answer.rfind("<start_of_turn>model")
-			start = start + len("<start_of_turn>model")
-		else:
-			start = start + len("<unused95>")
+		response = outputs[0][input_ids.shape[1]:]
 
-		end = answer.find("<end_of_turn>", start)
-		if end == -1:
-			end = len(answer)
-
-		return answer[start:end].strip().replace("<eos>", "")
+		return self.tokenizer.decode(response, skip_special_tokens=True)
 	
 	def generate_stream(
 		self,
-		input: MedGemmaInput | str,
+		input: Gemma3Input | str,
 		params: GenerationParams | None = None
 	) -> Iterator[str]:
 		if self.model is None or self.tokenizer is None:
@@ -227,25 +300,5 @@ class MedGemma(BaseModel):
 		thread = threading.Thread(target=generate_fn)
 		thread.start()
 
-		buffer = ""
-		is_thinking = None
-		
 		for new_text in streamer:
-			buffer += new_text
-
-			if is_thinking is None:
-				if len(buffer.split()) > 5:
-					is_thinking = False
-					continue
-
-				lower_buffer = buffer.lower()
-				if lower_buffer.find("thought") != -1 or lower_buffer.find("<unused94>") != -1:
-					is_thinking = True
-					continue
-			elif not is_thinking:
-				yield buffer
-				buffer = "" 
-			else:
-				if buffer.find("<unused95>") != -1:
-					is_thinking = False
-					buffer = buffer.split("<unused95>", 1)[1]
+			yield new_text

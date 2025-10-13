@@ -1,3 +1,4 @@
+from .models.Gemma import Gemma3
 from .models.GPT_OSS import GPT_OSS
 from .models.LLaMA3 import LLaMA3
 from .models.LLaMA4 import LLaMA4
@@ -8,9 +9,10 @@ from .schemas.params import (GenerationBeamsParams, GenerationParams,
 from .utils.evaluation_methods import text_evaluation
 
 __all__ = [
+  "Gemma3",
+  "GPT_OSS",
   "LLaMA3",
   "LLaMA4",
-  "GPT_OSS",
   "MedGemma",
   "RAGPipeline",
   "GenerationBeamsParams",

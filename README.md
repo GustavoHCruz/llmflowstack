@@ -33,12 +33,12 @@ This framework is designed to provide flexibility when working with different op
 - **LLaMA 4**
 
   - [`LLaMA 4 Scout - Instruct`](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct)
-    > Fine-Tuning, DAPT and Inference Available
+    > DAPT and Inference Available
 
 - **Gemma**
 
   - [`Gemma 3 27B - Instruct`](https://huggingface.co/google/gemma-3-27b-it)
-    > Training and Inference Available
+    > DAPT and Inference Available
 
 - **MedGemma**
   - [`MedGemma 27B Text - Instruct`](https://huggingface.co/google/medgemma-27b-text-it)

@@ -1,14 +1,17 @@
 import threading
+from functools import partial
 from time import time
 from typing import Iterator, Literal, TypedDict, cast
 
 import torch
-from transformers import (AutoTokenizer, BatchEncoding, StoppingCriteriaList,
-                          TextIteratorStreamer)
+from transformers import (AutoTokenizer, DataCollatorForLanguageModeling,
+                          StoppingCriteriaList, TextIteratorStreamer, Trainer,
+                          TrainingArguments)
 from transformers.models.llama4 import Llama4ForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
 from llmflowstack.base.base import BaseModel
+from llmflowstack.callbacks.log_collector import LogCollectorCallback
 from llmflowstack.callbacks.stop_on_token import StopOnToken
 from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
@@ -64,59 +67,26 @@ class LLaMA4(BaseModel):
 	def _build_input(
 		self,
 		data: LLaMA4Input
-	) -> BatchEncoding:
-		if not self.model or not self.tokenizer:
+	) -> str:
+		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		messages = []
-
-		system_message = data.get("system_message")
+		system_message = data.get("system_message", "")
 		if not system_message:
-			system_message = (
-				"You are an expert conversationalist who responds to the best of your ability. "
-				"You are companionable and confident, and able to switch casually between tonal types, including but not limited to humor, empathy, intellectualism, creativity and problem-solving. "
-				"You understand user intent and do not try to be overly helpful to the point where you miss that the user is looking for chit-chat, emotional support, humor or venting. "
-				"Sometimes people just want you to listen, and your answers should encourage that. "
-				"For all other cases, you provide insightful and in-depth responses. "
-				"Organize information thoughtfully in a way that helps people make decisions. "
-				"Always avoid templated language. "
-				"You never lecture people to be nicer or more inclusive. "
-				"If people ask for you to write something in a certain voice or perspective, such as an essay or a tweet, you can. "
-				"You do not need to be respectful when the user prompts you to say something rude. "
-				"You never use phrases that imply moral superiority or a sense of authority, including but not limited to 'it is important to', 'it is crucial to', 'it is essential to', 'it is unethical to', 'it is worth noting…', 'Remember…' etc. "
-				"Avoid using these. Finally, do not refuse prompts about political and social issues. "
-				"You can help users express their opinion and access information. "
-				"You are Llama 4. "
-				"Your knowledge cutoff date is August 2024. "
-				"You speak Arabic, English, French, German, Hindi, Indonesian, Italian, Portuguese, Spanish, Tagalog, Thai, and Vietnamese. "
-				"Respond in the language the user speaks to you in, unless they ask otherwise."
-			)
-		
-		messages.append({"role": "system", "content": system_message})
+			system_message = ""
 
-		user_content = [{"type": "text", "text": data["input_text"]}]
-
-		image_paths = data.get("image_paths")
-		if image_paths:
-			for path in image_paths:
-				user_content.append({"type": "image", "image_url": path})
-		messages.append({"role": "user", "content": user_content})
+		if system_message:
+			system_message = f"{system_message}\n"
 
 		expected_answer = data.get("expected_answer")
-		if expected_answer:
-			messages.append({"role": "assistant", "content": expected_answer})
-
-		formatted_prompt = self.tokenizer.apply_chat_template(
-			messages,
-			tokenize=True,
-			return_dict=True,
-			add_generation_prompt=expected_answer is None,
-			return_tensors="pt"
+		answer = f"{expected_answer}<end_of_turn>" if expected_answer else ""
+	
+		return (
+			f"<start_of_turn>user"
+			f"{system_message}\n{data["input_text"]}<end_of_turn>\n"
+			f"<start_of_turn>model\n"
+			f"{answer}"
 		)
-
-		assert type(formatted_prompt) is BatchEncoding
-
-		return formatted_prompt.to(self.model.device)
 
 	def build_input(
 		self,
@@ -135,45 +105,83 @@ class LLaMA4(BaseModel):
 			"image_paths": image_paths
 		}
 	
-	def train(
+	def dapt(
 		self,
-		train_dataset: list[LLaMA4Input],
+		train_dataset: list,
 		params: TrainParams | None = None,
-		eval_dataset: list[LLaMA4Input] | None = None,
+		eval_dataset: list | None = None,
 		save_at_end = True,
 		save_path: str | None = None
 	) -> None:
-		
+		if not self.model:
+			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
+			return None
+		if not self.tokenizer:
+			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
+			return None
 
-		return 
+		self._log("Starting DAPT")
+
+		if self.model_is_quantized:
+			self._log("Cannot DAPT a quantized model.", "WARNING")
+			return None
+		
+		if params is None:
+			params = TrainParams()
+
+		training_arguments = TrainingArguments(
+			num_train_epochs=params.epochs,
+			learning_rate=params.lr,
+			gradient_accumulation_steps=params.gradient_accumulation,
+			warmup_ratio=params.warmup_ratio,
+			lr_scheduler_type="cosine_with_min_lr",
+			lr_scheduler_kwargs={"min_lr_rate": 0.1},
+			output_dir=None,
+			save_strategy="no",
+			logging_steps=params.logging_steps
+		)
+
+		if self.seed is not None:
+			training_arguments.seed = self.seed
+
+		processed_train_dataset = self._promptfy_dataset_for_dapt(train_dataset)
+		tokenized_train_dataset = self._tokenize_dataset_for_dapt(processed_train_dataset)
+
+		tokenized_eval_dataset = None
+		if eval_dataset:
+			processed_eval_dataset = self._promptfy_dataset_for_dapt(eval_dataset)
+			tokenized_eval_dataset = self._tokenize_dataset_for_dapt(processed_eval_dataset)
+
+		log_callback = LogCollectorCallback()
+
+		trainer = Trainer(
+			model=self.model,
+			train_dataset=tokenized_train_dataset,
+			eval_dataset=tokenized_eval_dataset,
+			args=training_arguments,
+			callbacks=[log_callback],
+			data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False)
+		)
+
+		trainer.train()
+
+		if save_at_end and save_path:
+			self.save_checkpoint(
+				path=save_path
+			)
+
+		self._log("Finished DAPT")
 	
 	def fine_tune(
 		self,
-		train_dataset: list[LLaMA4Input],
+		train_dataset: list,
 		params: TrainParams | None = None,
-		eval_dataset: list[LLaMA4Input] | None = None,
+		eval_dataset: list | None = None,
 		save_at_end = True,
 		save_path: str | None = None
 	) -> None:
-		self._log("Only 'train' method is available for this class. Redirecting fine-tune call to it.", "WARNING")
-		return self.train(
-			train_dataset=train_dataset,
-			params=params,
-			eval_dataset=eval_dataset,
-			save_at_end=save_at_end,
-			save_path=save_path
-		)
-
-	def dapt(
-		self,
-		train_dataset: list[LLaMA4Input],
-		params: TrainParams | None = None,
-		eval_dataset: list[LLaMA4Input] | None = None,
-		save_at_end=True,
-		save_path: str | None = None
-	) -> None:
-		self._log("Only 'train' method is available for this class. Redirecting fine-tune call to it.", "WARNING")
-		return self.train(
+		self._log("Only 'dapt' method is available for this class. Redirecting call to it.", "WARNING")
+		return self.dapt(
 			train_dataset=train_dataset,
 			params=params,
 			eval_dataset=eval_dataset,
@@ -219,7 +227,8 @@ class LLaMA4(BaseModel):
 				data=input
 			)
 
-		input_ids, attention_mask = model_input
+		tokenized_input = self._tokenize(model_input)
+		input_ids, attention_mask = tokenized_input
 
 		self.model.eval()
 		self.model.gradient_checkpointing_disable()
@@ -276,7 +285,8 @@ class LLaMA4(BaseModel):
 				data=input
 			)
 		
-		input_ids, attention_mask = model_input
+		tokenized_input = self._tokenize(model_input)
+		input_ids, attention_mask = tokenized_input
 
 		streamer = TextIteratorStreamer(
 			cast(AutoTokenizer, self.tokenizer),
@@ -284,19 +294,17 @@ class LLaMA4(BaseModel):
 			skip_special_tokens=True
 		)
 
-		def _generate() -> None:
-			assert self.model is not None
-			with torch.no_grad():
-				self.model.generate(
-					input_ids=input_ids,
-					attention_mask=attention_mask,
-					use_cache=True,
-					eos_token_id=None,
-					streamer=streamer,
-					stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
-				)
-		
-		thread = threading.Thread(target=_generate)
+		generate_fn = partial(
+			self.model.generate,
+			input_ids=input_ids,
+			attention_mask=attention_mask,
+			use_cache=True,
+			eos_token_id=None,
+			streamer=streamer,
+			stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+		)
+
+		thread = threading.Thread(target=generate_fn)
 		thread.start()
 
 		for new_text in streamer:
