@@ -1,3 +1,4 @@
+import gc
 import json
 import logging
 import os
@@ -35,7 +36,7 @@ class BaseModel(ABC):
 	def __init__(
 		self,
 		checkpoint: str | None = None,
-		quantization: Literal["8bit", "4bit"] | bool | None = None,
+		quantization: Literal["4bit", "8bit"] | bool | None = None,
 		seed: int | None = None,
 		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
 	) -> None:
@@ -64,7 +65,8 @@ class BaseModel(ABC):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: Literal["8bit", "4bit"] | bool | None = None
+		*args: Any,
+		**kwargs: Any
 	) -> None:
 		pass
 
@@ -79,7 +81,7 @@ class BaseModel(ABC):
 	def load_checkpoint(
 		self,
 		checkpoint: str,
-		quantization: Literal["8bit", "4bit"] | bool | None = None
+		quantization: Any
 	) -> None:
 		if self.model:
 			self._log("A model is already loaded. Attempting to reset it.", "WARNING")
@@ -223,7 +225,7 @@ class BaseModel(ABC):
 		self,
 		*args: Any,
 		**kwargs: Any
-	) -> str:
+	) -> str | BatchEncoding:
 		pass
 
 	def _tokenize(
@@ -282,7 +284,7 @@ class BaseModel(ABC):
 		output = []
 		for data in dataset:
 			complete_input = self._build_input(
-				**{field: data.get(field) for field in self.question_fields + self.answer_fields}
+				data
 			)
 			output.append(complete_input)
 
@@ -403,13 +405,16 @@ class BaseModel(ABC):
 	def _build_input_for_fine_tune(
 		self,
 		input: dict
-	) -> dict[Literal["partial", "complete"], str]:
+	) -> dict[Literal["partial", "complete"], str | BatchEncoding]:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		partial = self._build_input(**{k: input[k] for k in self.question_fields if k in input})
+		partial = self._build_input({
+			**input,
+			"expected_answer": None
+		})
 
-		complete = self._build_input(**{k: input[k] for k in self.question_fields + self.answer_fields if k in input})
+		complete = self._build_input(input)
 
 		return {
 			"partial": partial,
@@ -508,6 +513,8 @@ class BaseModel(ABC):
 		try:
 			self._log("Trying to reset model...")
 			del self.model
+			gc.collect()
+			torch.cuda.empty_cache()
 			self.model = None
 			self.model_is_quantized = None
 			self.process_id = None

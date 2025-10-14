@@ -1,47 +1,42 @@
-import textwrap
 import threading
 from functools import partial
 from time import time
 from typing import Iterator, Literal, TypedDict, cast
 
 import torch
-from openai_harmony import HarmonyEncodingName, load_harmony_encoding
-from transformers import (AutoTokenizer, StoppingCriteriaList,
-                          TextIteratorStreamer)
-from transformers.models.gpt_oss import GptOssForCausalLM
-from transformers.utils.quantization_config import Mxfp4Config
+from transformers import (AutoTokenizer, DataCollatorForLanguageModeling,
+                          StoppingCriteriaList, TextIteratorStreamer, Trainer,
+                          TrainingArguments)
+from transformers.models.llama4 import Llama4ForCausalLM
 
 from llmflowstack.base.base import BaseModel
+from llmflowstack.callbacks.log_collector import LogCollectorCallback
 from llmflowstack.callbacks.stop_on_token import StopOnToken
-from llmflowstack.schemas.params import GenerationParams
+from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.generation_utils import create_generation_params
 
 
-class GPTOSSInput(TypedDict):
+class LLaMA4Input(TypedDict):
 	input_text: str
-	system_message: str | None
-	developer_message: str | None
 	expected_answer: str | None
-	reasoning_message: str | None
-	reasoning_level: Literal["Low", "Medium", "High"] | None
+	system_message: str | None
+	image_paths: list[str] | None
 
-class GPT_OSS(BaseModel):
-	model: GptOssForCausalLM | None = None
-	reasoning_level: Literal["Low", "Medium", "High"] = "Low"
-	question_fields = ["input_text", "developer_message", "system_message"]
-	answer_fields = ["expected_answer", "reasoning_message"]
+class LLaMA4(BaseModel):
+	model: Llama4ForCausalLM | None = None
+	question_fields = ["input_text", "system_message"]
+	answer_fields = ["expected_answer"]
 
 	def __init__(
 		self,
 		checkpoint: str | None = None,
-		quantization: bool | None = None,
 		seed: int | None = None,
 		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
 	) -> None:
 		return super().__init__(
 			checkpoint=checkpoint,
-			quantization=quantization,
+			quantization=None,
 			seed=seed,
 			log_level=log_level
 		)
@@ -53,109 +48,162 @@ class GPT_OSS(BaseModel):
 		if not self.tokenizer:
 			self._log("Could not set stop tokens - generation may not work...", "WARNING")
 			return None
-		encoding = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
-		particular_tokens = encoding.stop_tokens_for_assistant_actions()
-		self.stop_token_ids = particular_tokens + tokens
+		particular_tokens = self.tokenizer.encode("<|eot|>")
+		self.stop_token_ids = tokens + particular_tokens
 
 	def _load_model(
 		self,
-		checkpoint: str,
-		quantization: bool | None = False
+		checkpoint: str
 	) -> None:
-		if quantization:
-			quantization_config = Mxfp4Config(dequantize=False)
-		else:
-			quantization_config = Mxfp4Config(dequantize=True)
-
-		try:
-			self.model = GptOssForCausalLM.from_pretrained(
-				checkpoint,
-				quantization_config=quantization_config,
-				dtype="auto",
-				device_map="auto",
-				attn_implementation="eager",
-			)
-		except Exception as _:
-			self._log("Error trying to load the model. Defaulting to load without quantization...", "WARNING")
-			self.model = GptOssForCausalLM.from_pretrained(
-				checkpoint,
-				dtype="auto",
-				device_map="auto",
-				attn_implementation="eager"
-			)
+		self.model = Llama4ForCausalLM.from_pretrained(
+			checkpoint,
+			dtype="auto",
+			device_map="auto",
+			attn_implementation="eager"
+		)
 	
 	def load_checkpoint(
 		self,
 		checkpoint: str,
-		quantization: bool | None = None
+		quantization: None = None
 	) -> None:
 		return super().load_checkpoint(checkpoint, quantization)
 
 	def _build_input(
 		self,
-		data: GPTOSSInput
+		data: LLaMA4Input
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		reasoning = data.get("reasoning_level")
-		if reasoning is None:
-			reasoning = self.reasoning_level
-
 		system_message = data.get("system_message", "")
-		system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\nReasoning: {reasoning}\n\n{system_message}# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|>"
+		if not system_message:
+			system_message = ""
 
-		developer_text = ""
-		developer_message = data.get("developer_message", "")
-		if developer_message:
-			developer_text = f"<|start|>developer<|message|># Instructions\n\n{developer_message}<|end|>"
+		if system_message:
+			system_message = f"{system_message}\n"
 
-		assistant_text = ""
-		reasoning_message = data.get("reasoning_message", "")
-		if reasoning_message:
-			assistant_text += f"<|start|>assistant<|channel|>analysis<|message|>{reasoning_message}<|end|>"
-
-		expected_answer = data.get("expected_answer", "")
-		if expected_answer:
-			assistant_text += f"<|start|>assistant<|channel|>final<|message|>{expected_answer}<|return|>"
-
-		return textwrap.dedent(f"""{system_text}{developer_text}<|start|>user<|message|>{data["input_text"]}<|end|>{assistant_text}""")
+		expected_answer = data.get("expected_answer")
+		answer = f"{expected_answer}<end_of_turn>" if expected_answer else ""
+	
+		return (
+			f"<start_of_turn>user"
+			f"{system_message}\n{data["input_text"]}<end_of_turn>\n"
+			f"<start_of_turn>model\n"
+			f"{answer}"
+		)
 
 	def build_input(
 		self,
 		input_text: str,
 		system_message: str | None = None,
-		developer_message: str | None = None,
 		expected_answer: str | None = None,
-		reasoning_message: str | None = None,
-		reasoning_level: Literal["Low", "Medium", "High"] | None = None
-	) -> GPTOSSInput:
+		image_paths: list[str] | None = None
+	) -> LLaMA4Input:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
 		return {
 			"input_text": input_text,
-			"developer_message": developer_message,
 			"system_message": system_message,
-			"reasoning_level": reasoning_level,
 			"expected_answer": expected_answer,
-			"reasoning_message": reasoning_message
+			"image_paths": image_paths
 		}
-
-	def set_reasoning_level(
+	
+	def dapt(
 		self,
-		level: Literal["Low", "Medium", "High"]
+		train_dataset: list,
+		params: TrainParams | None = None,
+		eval_dataset: list | None = None,
+		save_at_end = True,
+		save_path: str | None = None
 	) -> None:
-		self.reasoning_level = level
+		if not self.model:
+			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
+			return None
+		if not self.tokenizer:
+			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
+			return None
+
+		self._log("Starting DAPT")
+
+		if self.model_is_quantized:
+			self._log("Cannot DAPT a quantized model.", "WARNING")
+			return None
+		
+		if params is None:
+			params = TrainParams()
+
+		training_arguments = TrainingArguments(
+			num_train_epochs=params.epochs,
+			learning_rate=params.lr,
+			gradient_accumulation_steps=params.gradient_accumulation,
+			warmup_ratio=params.warmup_ratio,
+			lr_scheduler_type="cosine_with_min_lr",
+			lr_scheduler_kwargs={"min_lr_rate": 0.1},
+			output_dir=None,
+			save_strategy="no",
+			logging_steps=params.logging_steps
+		)
+
+		if self.seed is not None:
+			training_arguments.seed = self.seed
+
+		processed_train_dataset = self._promptfy_dataset_for_dapt(train_dataset)
+		tokenized_train_dataset = self._tokenize_dataset_for_dapt(processed_train_dataset)
+
+		tokenized_eval_dataset = None
+		if eval_dataset:
+			processed_eval_dataset = self._promptfy_dataset_for_dapt(eval_dataset)
+			tokenized_eval_dataset = self._tokenize_dataset_for_dapt(processed_eval_dataset)
+
+		log_callback = LogCollectorCallback()
+
+		trainer = Trainer(
+			model=self.model,
+			train_dataset=tokenized_train_dataset,
+			eval_dataset=tokenized_eval_dataset,
+			args=training_arguments,
+			callbacks=[log_callback],
+			data_collator=DataCollatorForLanguageModeling(self.tokenizer, mlm=False)
+		)
+
+		trainer.train()
+
+		if save_at_end and save_path:
+			self.save_checkpoint(
+				path=save_path
+			)
+
+		self._log("Finished DAPT")
+	
+	def fine_tune(
+		self,
+		train_dataset: list,
+		params: TrainParams | None = None,
+		eval_dataset: list | None = None,
+		save_at_end = True,
+		save_path: str | None = None
+	) -> None:
+		self._log("Only 'dapt' method is available for this class. Redirecting call to it.", "WARNING")
+		return self.dapt(
+			train_dataset=train_dataset,
+			params=params,
+			eval_dataset=eval_dataset,
+			save_at_end=save_at_end,
+			save_path=save_path
+		)
 
 	def generate(
 		self,
-		input: GPTOSSInput | str,
+		input: LLaMA4Input | str,
 		params: GenerationParams | None = None
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
 			self._log("Model or Tokenizer missing", "WARNING")
 			return None
+
+		self.model
 
 		self._log(f"Processing received input...'")
 
@@ -166,6 +214,10 @@ class GPT_OSS(BaseModel):
 
 		generation_params = create_generation_params(params)
 		self.model.generation_config = generation_params
+
+		if params:
+			generation_params = create_generation_params(params)
+			self.model.generation_config = generation_params
 
 		model_input = None
 		if isinstance(input, str):
@@ -181,11 +233,11 @@ class GPT_OSS(BaseModel):
 			)
 
 		tokenized_input = self._tokenize(model_input)
-
 		input_ids, attention_mask = tokenized_input
 
 		self.model.eval()
 		self.model.gradient_checkpointing_disable()
+
 		start = time()
 
 		with torch.no_grad():
@@ -197,28 +249,18 @@ class GPT_OSS(BaseModel):
 				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 			)
 
-		answer = self.tokenizer.decode(outputs[0])
-
 		end = time()
 		total_time = end - start
 
 		self._log(f"Response generated in {total_time:.4f} seconds")
 
-		start = answer.rfind("<|message|>")
-		if start == -1:
-			return ""
+		response = outputs[0][input_ids.shape[1]:]
 
-		start += len("<|message|>")
-
-		end = answer.find("<|return|>", start)
-		if end == -1:
-			end = len(answer)
-
-		return answer[start:end].strip()
+		return self.tokenizer.decode(response, skip_special_tokens=True)
 	
 	def generate_stream(
 		self,
-		input: GPTOSSInput | str,
+		input: LLaMA4Input | str,
 		params: GenerationParams | None = None
 	) -> Iterator[str]:
 		if self.model is None or self.tokenizer is None:
@@ -235,6 +277,7 @@ class GPT_OSS(BaseModel):
 		generation_params = create_generation_params(params)
 		self.model.generation_config = generation_params
 
+		model_input = None
 		if isinstance(input, str):
 			model_input = self.build_input(
 				input_text=input
@@ -269,16 +312,5 @@ class GPT_OSS(BaseModel):
 		thread = threading.Thread(target=generate_fn)
 		thread.start()
 
-		done_thinking = False
-		buffer = ""
-
 		for new_text in streamer:
-			buffer += new_text
-
-			if "final" in buffer:
-				done_thinking = True
-				buffer = buffer.split("final", 1)[1]
-			
-			if done_thinking:
-				yield buffer
-				buffer = ""
+			yield new_text
