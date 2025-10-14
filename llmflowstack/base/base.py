@@ -64,7 +64,8 @@ class BaseModel(ABC):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: Literal["8bit", "4bit"] | bool | None = None
+		*args: Any,
+		**kwargs: Any
 	) -> None:
 		pass
 

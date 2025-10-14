@@ -28,6 +28,20 @@ class MedGemma(BaseModel):
 	question_fields = ["input_text", "system_message"]
 	answer_fields = ["expected_answer"]
 
+	def __init__(
+		self,
+		checkpoint: str | None = None,
+		quantization: Literal["4bit"] | None = None,
+		seed: int | None = None,
+		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
+	) -> None:
+		return super().__init__(
+			checkpoint=checkpoint,
+			quantization=quantization,
+			seed=seed,
+			log_level=log_level
+		)
+
 	def _set_generation_stopping_tokens(
 		self,
 		tokens: list[int]
@@ -41,17 +55,14 @@ class MedGemma(BaseModel):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: Literal["8bit", "4bit"] | bool | None = None
+		quantization: Literal["4bit"] | None = None
 	) -> None:
 		quantization_config = None
 		if quantization == "4bit":
 			quantization_config = BitsAndBytesConfig(
 				load_in_4bit=True
 			)
-		if quantization == "8bit":
-			quantization_config = BitsAndBytesConfig(
-				load_in_8bit=True
-			)
+			self.model_is_quantized = True
 
 		self.model = Gemma3ForCausalLM.from_pretrained(
 			checkpoint,

@@ -8,7 +8,6 @@ from transformers import (AutoTokenizer, DataCollatorForLanguageModeling,
                           StoppingCriteriaList, TextIteratorStreamer, Trainer,
                           TrainingArguments)
 from transformers.models.llama4 import Llama4ForCausalLM
-from transformers.utils.quantization_config import BitsAndBytesConfig
 
 from llmflowstack.base.base import BaseModel
 from llmflowstack.callbacks.log_collector import LogCollectorCallback
@@ -29,6 +28,19 @@ class LLaMA4(BaseModel):
 	question_fields = ["input_text", "system_message"]
 	answer_fields = ["expected_answer"]
 
+	def __init__(
+		self,
+		checkpoint: str | None = None,
+		seed: int | None = None,
+		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
+	) -> None:
+		return super().__init__(
+			checkpoint=checkpoint,
+			quantization=None,
+			seed=seed,
+			log_level=log_level
+		)
+
 	def _set_generation_stopping_tokens(
 		self,
 		tokens: list[int]
@@ -41,24 +53,10 @@ class LLaMA4(BaseModel):
 
 	def _load_model(
 		self,
-		checkpoint: str,
-		quantization: Literal["8bit", "4bit"] | bool | None = None
+		checkpoint: str
 	) -> None:
-		quantization_config = None
-		if quantization == "4bit":
-			quantization_config = BitsAndBytesConfig(
-				load_in_4bit=True
-			)
-			self.model_is_quantized = True
-		if quantization == "8bit":
-			quantization_config = BitsAndBytesConfig(
-				load_in_8bit=True
-			)
-			self.model_is_quantized = True
-
 		self.model = Llama4ForCausalLM.from_pretrained(
 			checkpoint,
-			quantization_config=quantization_config,
 			dtype="auto",
 			device_map="auto",
 			attn_implementation="eager"

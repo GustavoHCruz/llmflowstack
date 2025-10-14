@@ -32,6 +32,20 @@ class GPT_OSS(BaseModel):
 	question_fields = ["input_text", "developer_message", "system_message"]
 	answer_fields = ["expected_answer", "reasoning_message"]
 
+	def __init__(
+		self,
+		checkpoint: str | None = None,
+		quantization: bool | None = None,
+		seed: int | None = None,
+		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
+	) -> None:
+		return super().__init__(
+			checkpoint=checkpoint,
+			quantization=quantization,
+			seed=seed,
+			log_level=log_level
+		)
+
 	def _set_generation_stopping_tokens(
 		self,
 		tokens: list[int]
@@ -46,7 +60,7 @@ class GPT_OSS(BaseModel):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: Literal["8bit", "4bit"] | bool | None = False
+		quantization: bool | None = False
 	) -> None:
 		if quantization:
 			self.model_is_quantized = True
