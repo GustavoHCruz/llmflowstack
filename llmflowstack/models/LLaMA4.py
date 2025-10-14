@@ -61,6 +61,13 @@ class LLaMA4(BaseModel):
 			device_map="auto",
 			attn_implementation="eager"
 		)
+	
+	def load_checkpoint(
+		self,
+		checkpoint: str,
+		quantization: None = None
+	) -> None:
+		return super().load_checkpoint(checkpoint, quantization)
 
 	def _build_input(
 		self,

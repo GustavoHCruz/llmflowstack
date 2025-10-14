@@ -63,7 +63,6 @@ class GPT_OSS(BaseModel):
 		quantization: bool | None = False
 	) -> None:
 		if quantization:
-			self.model_is_quantized = True
 			quantization_config = Mxfp4Config(dequantize=False)
 		else:
 			quantization_config = Mxfp4Config(dequantize=True)
@@ -84,6 +83,13 @@ class GPT_OSS(BaseModel):
 				device_map="auto",
 				attn_implementation="eager"
 			)
+	
+	def load_checkpoint(
+		self,
+		checkpoint: str,
+		quantization: bool | None = None
+	) -> None:
+		return super().load_checkpoint(checkpoint, quantization)
 
 	def _build_input(
 		self,

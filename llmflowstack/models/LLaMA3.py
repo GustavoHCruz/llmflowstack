@@ -53,19 +53,17 @@ class LLaMA3(BaseModel):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: Literal["8bit", "4bit"] | None = None
+		quantization: Literal["4bit", "8bit"] | None = None
 	) -> None:
 		quantization_config = None
 		if quantization == "4bit":
 			quantization_config = BitsAndBytesConfig(
 				load_in_4bit=True
 			)
-			self.model_is_quantized = True
 		if quantization == "8bit":
 			quantization_config = BitsAndBytesConfig(
 				load_in_8bit=True
 			)
-			self.model_is_quantized = True
 
 		self.model = LlamaForCausalLM.from_pretrained(
 			checkpoint,
@@ -74,6 +72,13 @@ class LLaMA3(BaseModel):
 			device_map="auto",
 			attn_implementation="eager"
 		)
+	
+	def load_checkpoint(
+		self,
+		checkpoint: str,
+		quantization: Literal['4bit', "8bit"] | None = None
+	) -> None:
+		return super().load_checkpoint(checkpoint, quantization)
 
 	def _build_input(
 		self,

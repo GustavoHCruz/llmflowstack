@@ -62,7 +62,6 @@ class MedGemma(BaseModel):
 			quantization_config = BitsAndBytesConfig(
 				load_in_4bit=True
 			)
-			self.model_is_quantized = True
 
 		self.model = Gemma3ForCausalLM.from_pretrained(
 			checkpoint,
@@ -71,6 +70,13 @@ class MedGemma(BaseModel):
 			device_map="auto",
 			attn_implementation="eager"
 		)
+	
+	def load_checkpoint(
+		self,
+		checkpoint: str,
+		quantization:  Literal["4bit"] | None = None
+	) -> None:
+		return super().load_checkpoint(checkpoint, quantization)
 
 	def _build_input(
 		self,
