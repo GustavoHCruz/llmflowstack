@@ -53,7 +53,8 @@ class LLaMA4(BaseModel):
 
 	def _load_model(
 		self,
-		checkpoint: str
+		checkpoint: str,
+		quantization: None = None
 	) -> None:
 		self.model = Llama4ForCausalLM.from_pretrained(
 			checkpoint,

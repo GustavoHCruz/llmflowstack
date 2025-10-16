@@ -1,5 +1,7 @@
 import uuid
 
+import chromadb
+import chromadb.config
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
@@ -38,10 +40,15 @@ class RAGPipeline:
 		
 		self.encoder = SentenceTransformer(checkpoint, trust_remote_code=True)
 
+		client_settings = chromadb.config.Settings(
+			anonymized_telemetry=False
+		)
+
 		self.vector_store = Chroma(
 			collection_name=collection_name,
 			embedding_function=EncoderWrapper(self.encoder),
-			persist_directory=persist_directory
+			persist_directory=persist_directory,
+			client_settings=client_settings
 		)
 
 		self.splitter = RecursiveCharacterTextSplitter(
