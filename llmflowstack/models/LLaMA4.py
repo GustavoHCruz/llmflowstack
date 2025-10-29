@@ -21,7 +21,6 @@ class LLaMA4Input(TypedDict):
 	input_text: str
 	expected_answer: str | None
 	system_message: str | None
-	image_paths: list[str] | None
 
 class LLaMA4(BaseModel):
 	model: Llama4ForCausalLM | None = None
@@ -82,15 +81,16 @@ class LLaMA4(BaseModel):
 			system_message = ""
 
 		if system_message:
-			system_message = f"{system_message}\n"
+			system_message = f"<|header_start|>system<|header_end|>\n\n{system_message}<|eot|>"
 
 		expected_answer = data.get("expected_answer")
-		answer = f"{expected_answer}<end_of_turn>" if expected_answer else ""
-	
+		answer = f"<|header_start|>assistant<|header_end|>\n\n{expected_answer}<|eot|>" if expected_answer else ""
+
 		return (
-			f"<start_of_turn>user"
-			f"{system_message}\n{data["input_text"]}<end_of_turn>\n"
-			f"<start_of_turn>model\n"
+			"<|begin_of_text|>"
+			f"{system_message}"
+			"<|header_start|>user<|header_end|>\n\n"
+			f"{data["input_text"]}<|eot|>"
 			f"{answer}"
 		)
 
@@ -98,8 +98,7 @@ class LLaMA4(BaseModel):
 		self,
 		input_text: str,
 		system_message: str | None = None,
-		expected_answer: str | None = None,
-		image_paths: list[str] | None = None
+		expected_answer: str | None = None
 	) -> LLaMA4Input:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
@@ -107,8 +106,7 @@ class LLaMA4(BaseModel):
 		return {
 			"input_text": input_text,
 			"system_message": system_message,
-			"expected_answer": expected_answer,
-			"image_paths": image_paths
+			"expected_answer": expected_answer
 		}
 	
 	def dapt(
