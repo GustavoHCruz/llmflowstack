@@ -84,7 +84,8 @@ class LLaMA4(BaseModel):
 			system_message = f"<|header_start|>system<|header_end|>\n\n{system_message}<|eot|>"
 
 		expected_answer = data.get("expected_answer")
-		answer = f"<|header_start|>assistant<|header_end|>\n\n{expected_answer}<|eot|>" if expected_answer else ""
+		answer = "<|header_start|>assistant<|header_end|>\n\n"
+		answer += f"{expected_answer}<|eot|>" if expected_answer else ""
 
 		return (
 			"<|begin_of_text|>"
