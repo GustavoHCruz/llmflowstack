@@ -1,7 +1,7 @@
 import threading
 from functools import partial
 from time import time
-from typing import Iterator, Literal, TypedDict, cast
+from typing import Iterator, TypedDict, cast
 
 import torch
 from transformers import (AutoTokenizer, DataCollatorForLanguageModeling,
@@ -9,12 +9,13 @@ from transformers import (AutoTokenizer, DataCollatorForLanguageModeling,
                           TrainingArguments)
 from transformers.models.llama4 import Llama4ForCausalLM
 
-from llmflowstack.base.base import BaseModel
 from llmflowstack.callbacks.log_collector import LogCollectorCallback
 from llmflowstack.callbacks.stop_on_token import StopOnToken
+from llmflowstack.decoders.BaseDecoder import BaseDecoder
 from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.generation_utils import create_generation_params
+from llmflowstack.utils.logging import LogLevel
 
 
 class LLaMA4Input(TypedDict):
@@ -22,7 +23,7 @@ class LLaMA4Input(TypedDict):
 	expected_answer: str | None
 	system_message: str | None
 
-class LLaMA4(BaseModel):
+class LLaMA4(BaseDecoder):
 	model: Llama4ForCausalLM | None = None
 	question_fields = ["input_text", "system_message"]
 	answer_fields = ["expected_answer"]
@@ -30,14 +31,12 @@ class LLaMA4(BaseModel):
 	def __init__(
 		self,
 		checkpoint: str | None = None,
-		seed: int | None = None,
-		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
+		seed: int | None = None
 	) -> None:
 		return super().__init__(
 			checkpoint=checkpoint,
 			quantization=None,
-			seed=seed,
-			log_level=log_level
+			seed=seed
 		)
 
 	def _set_generation_stopping_tokens(
@@ -45,7 +44,7 @@ class LLaMA4(BaseModel):
 		tokens: list[int]
 	) -> None:
 		if not self.tokenizer:
-			self._log("Could not set stop tokens - generation may not work...", "WARNING")
+			self._log("Could not set stop tokens - generation may not work...", LogLevel.WARNING)
 			return None
 		particular_tokens = self.tokenizer.encode("<|eot|>")
 		self.stop_token_ids = tokens + particular_tokens
@@ -119,16 +118,16 @@ class LLaMA4(BaseModel):
 		save_path: str | None = None
 	) -> None:
 		if not self.model:
-			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
+			self._log("Could not find a model loaded. Try loading a model first.", LogLevel.WARNING)
 			return None
 		if not self.tokenizer:
-			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
+			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", LogLevel.WARNING)
 			return None
 
 		self._log("Starting DAPT")
 
 		if self.model_is_quantized:
-			self._log("Cannot DAPT a quantized model.", "WARNING")
+			self._log("Cannot DAPT a quantized model.", LogLevel.WARNING)
 			return None
 		
 		if params is None:
@@ -185,7 +184,7 @@ class LLaMA4(BaseModel):
 		save_at_end = True,
 		save_path: str | None = None
 	) -> None:
-		self._log("Only 'dapt' method is available for this class. Redirecting call to it.", "WARNING")
+		self._log("Only 'dapt' method is available for this class. Redirecting call to it.", LogLevel.WARNING)
 		return self.dapt(
 			train_dataset=train_dataset,
 			params=params,
@@ -200,7 +199,7 @@ class LLaMA4(BaseModel):
 		params: GenerationParams | None = None
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", "WARNING")
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			return None
 
 		self.model
@@ -264,7 +263,7 @@ class LLaMA4(BaseModel):
 		params: GenerationParams | None = None
 	) -> Iterator[str]:
 		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", "WARNING")
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			if False:
 				yield ""
 			return

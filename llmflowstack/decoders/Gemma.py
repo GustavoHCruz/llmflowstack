@@ -10,12 +10,13 @@ from transformers import (AutoTokenizer, DataCollatorForLanguageModeling,
 from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
-from llmflowstack.base.base import BaseModel
 from llmflowstack.callbacks.log_collector import LogCollectorCallback
 from llmflowstack.callbacks.stop_on_token import StopOnToken
+from llmflowstack.decoders.BaseDecoder import BaseDecoder
 from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.generation_utils import create_generation_params
+from llmflowstack.utils.logging import LogLevel
 
 
 class Gemma3Input(TypedDict):
@@ -24,7 +25,7 @@ class Gemma3Input(TypedDict):
 	system_message: str | None
 	image_paths: list[str] | None
 
-class Gemma3(BaseModel):
+class Gemma3(BaseDecoder):
 	model: Gemma3ForCausalLM | None = None
 	question_fields = ["input_text", "system_message"]
 	answer_fields = ["expected_answer"]
@@ -33,14 +34,12 @@ class Gemma3(BaseModel):
 		self,
 		checkpoint: str | None = None,
 		quantization: Literal["4bit"] | None = None,
-		seed: int | None = None,
-		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
+		seed: int | None = None
 	) -> None:
 		return super().__init__(
 			checkpoint=checkpoint,
 			quantization=quantization,
-			seed=seed,
-			log_level=log_level
+			seed=seed
 		)
 
 	def _set_generation_stopping_tokens(
@@ -48,7 +47,7 @@ class Gemma3(BaseModel):
 		tokens: list[int]
 	) -> None:
 		if not self.tokenizer:
-			self._log("Could not set stop tokens - generation may not work...", "WARNING")
+			self._log("Could not set stop tokens - generation may not work...", LogLevel.WARNING)
 			return None
 		particular_tokens = self.tokenizer.encode("<end_of_turn>")
 		self.stop_token_ids = tokens + particular_tokens
@@ -129,16 +128,16 @@ class Gemma3(BaseModel):
 		save_path: str | None = None
 	) -> None:
 		if not self.model:
-			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
+			self._log("Could not find a model loaded. Try loading a model first.", LogLevel.WARNING)
 			return None
 		if not self.tokenizer:
-			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
+			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", LogLevel.WARNING)
 			return None
 
 		self._log("Starting Training")
 
 		if self.model_is_quantized:
-			self._log("Cannot traub a quantized model.", "WARNING")
+			self._log("Cannot traub a quantized model.", LogLevel.WARNING)
 			return None
 		
 		if params is None:
@@ -195,7 +194,7 @@ class Gemma3(BaseModel):
 		save_at_end = True,
 		save_path: str | None = None
 	) -> None:
-		self._log("Only 'dapt' method is available for this class. Redirecting call to it.", "WARNING")
+		self._log("Only 'dapt' method is available for this class. Redirecting call to it.", LogLevel.WARNING)
 		return self.dapt(
 			train_dataset=train_dataset,
 			params=params,
@@ -210,7 +209,7 @@ class Gemma3(BaseModel):
 		params: GenerationParams | None = None,
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", "WARNING")
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			return None
 
 		self._log(f"Processing received input...'")
@@ -267,7 +266,7 @@ class Gemma3(BaseModel):
 		params: GenerationParams | None = None
 	) -> Iterator[str]:
 		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", "WARNING")
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			if False:
 				yield ""
 			return
