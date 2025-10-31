@@ -1,15 +1,14 @@
 import gc
 import json
-import logging
 import os
 import random
 from abc import ABC, abstractmethod
+from logging import getLogger
 from typing import Any, Literal, cast
 from uuid import uuid4
 
 import numpy as np
 import torch
-from colorama import Fore, Style, init
 from datasets import Dataset
 from torch import Tensor
 from transformers import AutoTokenizer, PreTrainedTokenizerBase
@@ -20,15 +19,15 @@ from trl.trainer.sft_trainer import SFTTrainer
 from llmflowstack.callbacks.log_collector import LogCollectorCallback
 from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
+from llmflowstack.utils.logging import LogLevel
 
 
-class BaseModel(ABC):
+class BaseDecoder(ABC):
 	model = None
 	tokenizer = None
 	_model_id = None
 	model_is_quantized = None
 	seed = None
-	log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO"
 	stop_token_ids = []
 	question_fields = []
 	answer_fields = []
@@ -37,20 +36,17 @@ class BaseModel(ABC):
 		self,
 		checkpoint: str | None = None,
 		quantization: Literal["4bit", "8bit"] | bool | None = None,
-		seed: int | None = None,
-		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
+		seed: int | None = None
 	) -> None:
 		if not self.question_fields or not self.answer_fields:
 			raise NotImplementedError("Subclasses must define question_fields and answer_fields.")
 
-		init(autoreset=True)
 		if seed:
 			self._set_seed(seed)
 
 		self._base_model = checkpoint
 
-		self._set_logger(log_level)
-		self.log_level = log_level
+		self.logger = getLogger(f"LLMFlowStack.{self.__class__.__name__}")
 
 		self.tokenizer: PreTrainedTokenizerBase | None = None
 
@@ -60,6 +56,17 @@ class BaseModel(ABC):
 				checkpoint=checkpoint,
 				quantization=quantization
 			)
+	
+	def _log(
+		self,
+		message: str,
+		level: LogLevel = LogLevel.INFO,
+	) -> None:
+		log_func = getattr(self.logger, level.lower(), None)
+		if log_func:
+			log_func(message)
+		else:
+			self.logger.info(message)
 	
 	@abstractmethod
 	def _load_model(
@@ -84,7 +91,7 @@ class BaseModel(ABC):
 		quantization: Any
 	) -> None:
 		if self.model:
-			self._log("A model is already loaded. Attempting to reset it.", "WARNING")
+			self._log("A model is already loaded. Attempting to reset it.", LogLevel.WARNING)
 			self.unload_model()
 
 		self._log(f"Loading model on '{checkpoint}'")
@@ -132,42 +139,6 @@ class BaseModel(ABC):
 	) -> None:
 		self._model_id = uuid4()
 
-	def _set_logger(
-		self,
-		level: str
-	) -> None:
-		level_map = {
-			"DEBUG": logging.DEBUG,
-			"INFO": logging.INFO,
-			"WARNING": logging.WARNING,
-			"ERROR": logging.ERROR,
-		}
-		numeric_level = level_map.get(level.upper(), logging.INFO)
-	
-		logging.basicConfig(
-			level=numeric_level,
-			format="%(asctime)s - %(levelname)s - %(message)s"
-		)
-		self.logger = logging.getLogger(__name__)
-
-	def _log(
-		self,
-		info: str,
-		level: Literal["INFO", "WARNING", "ERROR", "DEBUG"] = "INFO"
-	) -> None:
-		if level == "INFO":
-			colored_msg = f"{Fore.GREEN}{info}{Style.RESET_ALL}"
-			self.logger.info(colored_msg)
-		elif level == "WARNING":
-			colored_msg = f"{Fore.YELLOW}{info}{Style.RESET_ALL}"
-			self.logger.warning(colored_msg)
-		elif level == "ERROR":
-			colored_msg = f"{Fore.RED}{info}{Style.RESET_ALL}"
-			self.logger.error(colored_msg)
-		elif level == "DEBUG":
-			colored_msg = f"{Fore.BLUE}{info}{Style.RESET_ALL}"
-			self.logger.debug(colored_msg)
-
 	def _set_seed(
 		self,
 		seed: int
@@ -190,10 +161,10 @@ class BaseModel(ABC):
 		path: str
 	) -> None:
 		if not self.model:
-			self._log("No model to save.", "WARNING")
+			self._log("No model to save.", LogLevel.WARNING)
 			return None
 		if not self.tokenizer:
-			self._log("No tokenizer to save.", "WARNING")
+			self._log("No tokenizer to save.", LogLevel.WARNING)
 			return None
 
 		os.makedirs(path, exist_ok=True)
@@ -299,16 +270,16 @@ class BaseModel(ABC):
 		save_path: str | None = None
 	) -> None:
 		if not self.model:
-			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
+			self._log("Could not find a model loaded. Try loading a model first.", LogLevel.WARNING)
 			return None
 		if not self.tokenizer:
-			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
+			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", LogLevel.WARNING)
 			return None
 
 		self._log("Starting DAPT")
 
 		if self.model_is_quantized:
-			self._log("Cannot DAPT a quantized model.", "WARNING")
+			self._log("Cannot DAPT a quantized model.", LogLevel.WARNING)
 			return None
 		
 		if params is None:
@@ -443,16 +414,16 @@ class BaseModel(ABC):
 		save_path: str | None = None
 	) -> None:
 		if not self.model:
-			self._log("Could not find a model loaded. Try loading a model first.", "WARNING")
+			self._log("Could not find a model loaded. Try loading a model first.", LogLevel.WARNING)
 			return None
 		if not self.tokenizer:
-			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", "WARNING")
+			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", LogLevel.WARNING)
 			return None
 
 		self._log("Starting fine-tune")
 
 		if self.model_is_quantized:
-			self._log("Cannot fine-tune a quantized model.", "WARNING")
+			self._log("Cannot fine-tune a quantized model.", LogLevel.WARNING)
 			return None
 		
 		if params is None:
@@ -521,8 +492,8 @@ class BaseModel(ABC):
 			self._model_id = None
 			self._log("Reset successfully.")
 		except Exception as e:
-			self._log("Couldn't reset model...", "ERROR")
-			self._log(f"{str(e)}", "DEBUG")
+			self._log("Couldn't reset model...", LogLevel.ERROR)
+			self._log(f"{str(e)}", LogLevel.DEBUG)
 
 	def set_seed(self, seed: int) -> None:
 		self._log(f"Setting seed value {seed}")
