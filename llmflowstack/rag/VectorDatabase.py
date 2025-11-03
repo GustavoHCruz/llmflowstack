@@ -1,15 +1,16 @@
+import gc
 import uuid
 from logging import getLogger
 
 import chromadb
 import chromadb.config
+import torch
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sentence_transformers import SentenceTransformer
 
-from llmflowstack.encoders.BaseEncoder import BaseEncoder
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
 
@@ -36,20 +37,22 @@ class EncoderWrapper(Embeddings):
 		return vectors.tolist()
 
 class VectorDatabase:
+	encoder: SentenceTransformer | None = None
 	collections: dict[str, Chroma] = {}
 
 	def __init__(
 		self,
-		encoder: BaseEncoder | SentenceTransformer,
+		checkpoint: str | None = None,
 		chunk_size: int = 1000,
 		chunk_overlap: int = 200
 	) -> None:
-		self.logger = getLogger(f"LLMFlowStack.{self.__class__.__class__}")
-		
-		if isinstance(encoder, BaseEncoder):
-			self.encoder = encoder.encoder
-		else:
-			self.encoder = encoder
+		self.logger = getLogger(f"LLMFlowStack.{self.__class__.__name__}")
+
+		self.encoder = None
+		if checkpoint:
+			self.load_encoder(
+				checkpoint=checkpoint
+			)
 
 		self.splitter = RecursiveCharacterTextSplitter(
 			chunk_size=chunk_size,
@@ -67,6 +70,35 @@ class VectorDatabase:
 			log_func(message)
 		else:
 			self.logger.info(message)
+	
+	def load_encoder(
+		self,
+		checkpoint: str
+	) -> None:
+		if self.encoder:
+			self._log("A encoder is already loaded. Attempting to reset it.", LogLevel.WARNING)
+			self.unload_encoder()
+
+		self._log(f"Loading encoder on '{checkpoint}'")
+		self.encoder = SentenceTransformer(
+			checkpoint,
+			trust_remote_code=True
+		)
+
+		self._log("Encoder loaded")
+	
+	def unload_encoder(
+		self
+	) -> None:
+		try:
+			del self.encoder
+			gc.collect()
+			torch.cuda.empty_cache()
+			self.encoder = None
+			self._log("Reset successfully.")
+		except Exception as e:
+			self._log("Couldn't reset encoder...", LogLevel.ERROR)
+			self._log(f"{str(e)}", LogLevel.DEBUG)
 	
 	def get_collection(
 		self,
