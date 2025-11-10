@@ -1,4 +1,3 @@
-import textwrap
 import threading
 from functools import partial
 from time import time
@@ -10,11 +9,12 @@ from transformers import (AutoTokenizer, StoppingCriteriaList,
 from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
-from llmflowstack.base.base import BaseModel
 from llmflowstack.callbacks.stop_on_token import StopOnToken
+from llmflowstack.decoders.BaseDecoder import BaseDecoder
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.generation_utils import create_generation_params
+from llmflowstack.utils.logging import LogLevel
 
 
 class MedGemmaInput(TypedDict):
@@ -22,7 +22,7 @@ class MedGemmaInput(TypedDict):
 	expected_answer: str | None
 	system_message: str | None
 
-class MedGemma(BaseModel):
+class MedGemma(BaseDecoder):
 	model: Gemma3ForCausalLM | None = None
 	can_think = False
 	question_fields = ["input_text", "system_message"]
@@ -32,14 +32,12 @@ class MedGemma(BaseModel):
 		self,
 		checkpoint: str | None = None,
 		quantization: Literal["4bit"] | None = None,
-		seed: int | None = None,
-		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
+		seed: int | None = None
 	) -> None:
 		return super().__init__(
 			checkpoint=checkpoint,
 			quantization=quantization,
-			seed=seed,
-			log_level=log_level
+			seed=seed
 		)
 
 	def _set_generation_stopping_tokens(
@@ -47,7 +45,7 @@ class MedGemma(BaseModel):
 		tokens: list[int]
 	) -> None:
 		if not self.tokenizer:
-			self._log("Could not set stop tokens - generation may not work...", "WARNING")
+			self._log("Could not set stop tokens - generation may not work...", LogLevel.WARNING)
 			return None
 		particular_tokens = self.tokenizer.encode("<end_of_turn>")
 		self.stop_token_ids = tokens + particular_tokens
@@ -128,7 +126,7 @@ class MedGemma(BaseModel):
 		params: GenerationParams | None = None,
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", "WARNING")
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			return None
 
 		self._log(f"Processing received input...'")
@@ -196,7 +194,7 @@ class MedGemma(BaseModel):
 		params: GenerationParams | None = None
 	) -> Iterator[str]:
 		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", "WARNING")
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			if False:
 				yield ""
 			return

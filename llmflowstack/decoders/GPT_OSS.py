@@ -1,4 +1,3 @@
-import textwrap
 import threading
 from functools import partial
 from time import time
@@ -11,11 +10,12 @@ from transformers import (AutoTokenizer, StoppingCriteriaList,
 from transformers.models.gpt_oss import GptOssForCausalLM
 from transformers.utils.quantization_config import Mxfp4Config
 
-from llmflowstack.base.base import BaseModel
 from llmflowstack.callbacks.stop_on_token import StopOnToken
+from llmflowstack.decoders.BaseDecoder import BaseDecoder
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.generation_utils import create_generation_params
+from llmflowstack.utils.logging import LogLevel
 
 
 class GPTOSSInput(TypedDict):
@@ -26,7 +26,7 @@ class GPTOSSInput(TypedDict):
 	reasoning_message: str | None
 	reasoning_level: Literal["Low", "Medium", "High"] | None
 
-class GPT_OSS(BaseModel):
+class GPT_OSS(BaseDecoder):
 	model: GptOssForCausalLM | None = None
 	reasoning_level: Literal["Low", "Medium", "High"] = "Low"
 	question_fields = ["input_text", "developer_message", "system_message"]
@@ -36,14 +36,12 @@ class GPT_OSS(BaseModel):
 		self,
 		checkpoint: str | None = None,
 		quantization: bool | None = None,
-		seed: int | None = None,
-		log_level: Literal["INFO", "DEBUG", "WARNING"] = "INFO",
+		seed: int | None = None
 	) -> None:
 		return super().__init__(
 			checkpoint=checkpoint,
 			quantization=quantization,
-			seed=seed,
-			log_level=log_level
+			seed=seed
 		)
 
 	def _set_generation_stopping_tokens(
@@ -51,7 +49,7 @@ class GPT_OSS(BaseModel):
 		tokens: list[int]
 	) -> None:
 		if not self.tokenizer:
-			self._log("Could not set stop tokens - generation may not work...", "WARNING")
+			self._log("Could not set stop tokens - generation may not work...", LogLevel.WARNING)
 			return None
 		encoding = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
 		particular_tokens = encoding.stop_tokens_for_assistant_actions()
@@ -76,7 +74,7 @@ class GPT_OSS(BaseModel):
 				attn_implementation="eager",
 			)
 		except Exception as _:
-			self._log("Error trying to load the model. Defaulting to load without quantization...", "WARNING")
+			self._log("Error trying to load the model. Defaulting to load without quantization...", LogLevel.WARNING)
 			self.model = GptOssForCausalLM.from_pretrained(
 				checkpoint,
 				dtype="auto",
@@ -119,7 +117,11 @@ class GPT_OSS(BaseModel):
 		if expected_answer:
 			assistant_text += f"<|start|>assistant<|channel|>final<|message|>{expected_answer}<|return|>"
 
-		return textwrap.dedent(f"""{system_text}{developer_text}<|start|>user<|message|>{data["input_text"]}<|end|>{assistant_text}""")
+		return (
+			f"{system_text}{developer_text}"
+			f"<|start|>user<|message|>{data["input_text"]}<|end|>"
+			f"{assistant_text}"
+		)
 
 	def build_input(
 		self,
@@ -154,7 +156,7 @@ class GPT_OSS(BaseModel):
 		params: GenerationParams | None = None
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", "WARNING")
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			return None
 
 		self._log(f"Processing received input...'")
@@ -222,7 +224,7 @@ class GPT_OSS(BaseModel):
 		params: GenerationParams | None = None
 	) -> Iterator[str]:
 		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", "WARNING")
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			if False:
 				yield ""
 			return

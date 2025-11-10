@@ -1,9 +1,9 @@
-from .models.Gemma import Gemma3
-from .models.GPT_OSS import GPT_OSS
-from .models.LLaMA3 import LLaMA3
-from .models.LLaMA4 import LLaMA4
-from .models.MedGemma import MedGemma
-from .rag.pipeline import RAGPipeline
+from .decoders.Gemma import Gemma3
+from .decoders.GPT_OSS import GPT_OSS
+from .decoders.LLaMA3 import LLaMA3
+from .decoders.LLaMA4 import LLaMA4
+from .decoders.MedGemma import MedGemma
+from .rag import VectorDatabase
 from .schemas.params import (GenerationBeamsParams, GenerationParams,
                              GenerationSampleParams, TrainParams)
 from .utils.evaluation_methods import text_evaluation
@@ -14,10 +14,10 @@ __all__ = [
   "LLaMA3",
   "LLaMA4",
   "MedGemma",
-  "RAGPipeline",
   "GenerationBeamsParams",
   "GenerationParams",
   "GenerationSampleParams",
   "TrainParams",
-  "text_evaluation"
+  "text_evaluation",
+  "VectorDatabase"
 ]
