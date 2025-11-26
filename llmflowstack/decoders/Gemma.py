@@ -270,6 +270,8 @@ class Gemma3(BaseDecoder):
 			if False:
 				yield ""
 			return
+		
+		self._log(f"Processing received input...'")
 
 		if params is None:
 			params = GenerationParams(max_new_tokens=32768)
@@ -311,8 +313,15 @@ class Gemma3(BaseDecoder):
 			stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 		)
 
+		start = time()
+
 		thread = threading.Thread(target=generate_fn)
 		thread.start()
 
 		for new_text in streamer:
 			yield new_text
+		
+		end = time()
+		total_time = end - start
+
+		self._log(f"Response generated in {total_time:.4f} seconds")

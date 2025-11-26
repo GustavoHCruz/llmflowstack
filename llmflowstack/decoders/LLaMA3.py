@@ -1,4 +1,5 @@
 import threading
+from functools import partial
 from time import time
 from typing import Iterator, Literal, TypedDict, cast
 
@@ -187,6 +188,8 @@ class LLaMA3(BaseDecoder):
 				yield ""
 			return
 		
+		self._log(f"Processing received input...'")
+		
 		if params is None:
 			params = GenerationParams(max_new_tokens=8192)
 		elif params.max_new_tokens is None:
@@ -217,20 +220,25 @@ class LLaMA3(BaseDecoder):
 			skip_special_tokens=True
 		)
 
-		def _generate() -> None:
-			assert self.model is not None
-			with torch.no_grad():
-				self.model.generate(
-					input_ids=input_ids,
-					attention_mask=attention_mask,
-					use_cache=True,
-					eos_token_id=None,
-					streamer=streamer,
-					stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
-				)
+		generate_fn = partial(
+			self.model.generate,
+			input_ids=input_ids,
+			attention_mask=attention_mask,
+			use_cache=True,
+			eos_token_id=None,
+			streamer=streamer,
+			stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+		)
 		
-		thread = threading.Thread(target=_generate)
+		start = time()
+
+		thread = threading.Thread(target=generate_fn)
 		thread.start()
 
 		for new_text in streamer:
 			yield new_text
+		
+		end = time()
+		total_time = end - start
+
+		self._log(f"Response generated in {total_time:.4f} seconds")

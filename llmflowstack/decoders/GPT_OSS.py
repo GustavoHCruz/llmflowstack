@@ -229,6 +229,8 @@ class GPT_OSS(BaseDecoder):
 				yield ""
 			return
 		
+		self._log(f"Processing received input...'")
+		
 		if params is None:
 			params = GenerationParams(max_new_tokens=32768)
 		elif params.max_new_tokens is None:
@@ -268,6 +270,8 @@ class GPT_OSS(BaseDecoder):
 			stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 		)
 
+		start = time()
+
 		thread = threading.Thread(target=generate_fn)
 		thread.start()
 
@@ -284,3 +288,8 @@ class GPT_OSS(BaseDecoder):
 			if done_thinking:
 				yield buffer
 				buffer = ""
+		
+		end = time()
+		total_time = end - start
+
+		self._log(f"Response generated in {total_time:.4f} seconds")
