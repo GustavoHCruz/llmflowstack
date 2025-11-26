@@ -24,11 +24,11 @@ class GPTOSSInput(TypedDict):
 	developer_message: str | None
 	expected_answer: str | None
 	reasoning_message: str | None
-	reasoning_level: Literal["Low", "Medium", "High"] | None
+	reasoning_level: Literal["Low", "Medium", "High", "Off"] | None
 
 class GPT_OSS(BaseDecoder):
 	model: GptOssForCausalLM | None = None
-	reasoning_level: Literal["Low", "Medium", "High"] = "Low"
+	reasoning_level: Literal["Low", "Medium", "High", "Off"] = "Low"
 	question_fields = ["input_text", "developer_message", "system_message"]
 	answer_fields = ["expected_answer", "reasoning_message"]
 
@@ -102,6 +102,8 @@ class GPT_OSS(BaseDecoder):
 
 		system_message = data.get("system_message", "")
 		system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\nReasoning: {reasoning}\n\n{system_message}# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|>"
+		if reasoning == "Off":
+			system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\n{system_message}# Valid channels: final. Channel must be included for every message.<|end|>"
 
 		developer_text = ""
 		developer_message = data.get("developer_message", "")
@@ -117,6 +119,9 @@ class GPT_OSS(BaseDecoder):
 		if expected_answer:
 			assistant_text += f"<|start|>assistant<|channel|>final<|message|>{expected_answer}<|return|>"
 
+		if not expected_answer and reasoning == "Off":
+			assistant_text += "<|start|>assistant<|channel|>final<|message|>"
+
 		return (
 			f"{system_text}{developer_text}"
 			f"<|start|>user<|message|>{data["input_text"]}<|end|>"
@@ -130,7 +135,7 @@ class GPT_OSS(BaseDecoder):
 		developer_message: str | None = None,
 		expected_answer: str | None = None,
 		reasoning_message: str | None = None,
-		reasoning_level: Literal["Low", "Medium", "High"] | None = None
+		reasoning_level: Literal["Low", "Medium", "High", "Off"] | None = None
 	) -> GPTOSSInput:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
@@ -146,7 +151,7 @@ class GPT_OSS(BaseDecoder):
 
 	def set_reasoning_level(
 		self,
-		level: Literal["Low", "Medium", "High"]
+		level: Literal["Low", "Medium", "High", "Off"]
 	) -> None:
 		self.reasoning_level = level
 
@@ -275,13 +280,13 @@ class GPT_OSS(BaseDecoder):
 		thread = threading.Thread(target=generate_fn)
 		thread.start()
 
-		done_thinking = False
+		done_thinking = self.reasoning_level == "Off"
 		buffer = ""
 
 		for new_text in streamer:
 			buffer += new_text
 
-			if "final" in buffer:
+			if "final" in buffer and not done_thinking:
 				done_thinking = True
 				buffer = buffer.split("final", 1)[1]
 			
