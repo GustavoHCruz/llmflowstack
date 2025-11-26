@@ -199,6 +199,8 @@ class MedGemma(BaseDecoder):
 				yield ""
 			return
 
+		self._log(f"Processing received input...'")
+
 		if params is None:
 			params = GenerationParams(max_new_tokens=32768)
 		elif params.max_new_tokens is None:
@@ -239,6 +241,8 @@ class MedGemma(BaseDecoder):
 			stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 		)
 
+		start = time()
+
 		thread = threading.Thread(target=generate_fn)
 		thread.start()
 
@@ -264,3 +268,8 @@ class MedGemma(BaseDecoder):
 				if buffer.find("<unused95>") != -1:
 					is_thinking = False
 					buffer = buffer.split("<unused95>", 1)[1]
+		
+		end = time()
+		total_time = end - start
+
+		self._log(f"Response generated in {total_time:.4f} seconds")
