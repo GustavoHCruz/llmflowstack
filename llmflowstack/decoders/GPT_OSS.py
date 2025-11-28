@@ -120,7 +120,7 @@ class GPT_OSS(BaseDecoder):
 			assistant_text += f"<|start|>assistant<|channel|>final<|message|>{expected_answer}<|return|>"
 
 		if not expected_answer and reasoning == "Off":
-			assistant_text += "<|start|>assistant<|channel|>final<|message|>"
+			assistant_text = "<|start|>assistant<|channel|>analysis<|message|><|end|><|start|>assistant<|channel|>final<|message|>"
 
 		return (
 			f"{system_text}{developer_text}"
