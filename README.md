@@ -90,6 +90,8 @@ thrid_model = GPT_OSS(
 ### Inference Examples
 
 ```python
+> from llmflowstack import GPT_OSS, GenerationParams, GenerationSampleParams
+
 > gpt_oss_model = GPT_OSS(checkpoint="/gpt-oss-120b")
 
 > gpt_oss_model.generate("Tell me a joke!")
@@ -116,6 +118,22 @@ thrid_model = GPT_OSS(
 > llama_model = LLaMA3(checkpoint="/llama-3.3-70B-Instruct", quantization="4bit")
 > llama_model.generate("Why is the sky blue?")
 'The sky appears blue because of a phenomenon called Rayleigh scattering, which is the scattering of light'
+
+# You can also disable GPT-OSS reasoning, but this works only when the model is being used strictly for inference. If the model has been trained or fine-tuned beforehand, this option will not behave correctly.
+> gpt_oss_model.set_reasoning_level("Off") # (inference-only)
+```
+
+You can also generate tokens using a streamer, that is, receiving one token at a time by using the iterator version of the generate function:
+
+```python
+llama_4 = LLaMA4(
+  checkpoint="llama-4-scout-17b-16e-instruct"
+)
+
+it = llama_4.generate_stream("Who was Alan Turing?")
+
+for text in it:
+  print(text, end="", sep="")   # The model will keep yielding tokens until it reaches an end-of-generation token (or until you stop iterating)
 ```
 
 ### Training Examples (DAPT & Fine-tune)
@@ -169,6 +187,56 @@ model.fine_tune(
 model.save_checkpoint(
   path="./model-output"
 )
+```
+
+### RAG Pipeline
+
+A prototype of a RAG pipeline is also available. You can instantiate and use it as follows:
+
+```python
+from llmflowstack import VectorDatabase
+
+vector_db = VectorDatabase(
+	checkpoint="jina-embeddings-v4",
+	chunk_size=1000,
+	chunk_overlap=200
+)
+
+# Create or load an existing collection
+vector_db.get_collection(
+	collection_name="memory_rag",
+	persist_directory="./memory"
+)
+
+vector_db.get_collection(
+	collection_name="files_rag",
+	persist_directory="./files"
+)
+
+# You may also omit the persist directory; in this case, the RAG data will be stored in memory
+vector_db.get_collection(
+	collection_name="files_rag"
+)
+
+# To create a new document in a collection
+vector_db.create(
+	collection_name="memory_rag",
+	information="User loves Pizza!",    # Main information to be indexed in the vector database
+	other_info={"category": "food"},
+	can_split=False,                    # Indicates whether the information can be split into chunks
+	should_index=True                   # Defaults to True — defines whether the document should be indexed or only returned as a Document instance
+)
+
+# After adding documents, you can query the database
+query_result = vector_db.query(
+	collection_name="memory_rag",
+	query="pizza",
+	filter={"category": "food"},
+	k=3   # Number of chunks to retrieve
+)
+
+print(query_result)
+# > "User loves Pizza!"
 ```
 
 ### NLP Evaluation
