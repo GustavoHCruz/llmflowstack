@@ -16,7 +16,7 @@ class TrainParams:
     "adamw_torch_fused",
     "sgd"
   ] = "adamw_torch"
-  logging_steps=1
+  logging_steps: int = 1
 
 @dataclass
 class GenerationBeamsParams:
