@@ -241,34 +241,35 @@ print(query_result)
 
 ### NLP Evaluation
 
+> **Disclaimer**
+> These evaluation functions are designed for batch processing. Models and encoders are loaded internally on each call, which may be inefficient for per-sample or streaming evaluation.
+
 ```python
 > from llmflowstack import text_evaluation
-> from llmflowstack.utils import (bert_score_evaluation, cosine_similarity_evaluation, rouge_evaluation)
+> from llmflowstack.utils import (bert_score_evaluation, bleu_score_evaluation, cosine_similarity_evaluation, rouge_evaluation)
 
 # Predictions from some model
 > predictions = ["Chico is a dog, and he is orange!", "Fred is a cat, and he is white!"]
 # References text (ground truth)
 > references = ["Chico is a cat, and he is black!", "Fred is a dog, and he is white!"]
 
-# BERTScore Evaluation
+# BERT Score Evaluation
 > bert_score_evaluation(predictions, references)
-{'bertscore_precision': 0.9772549867630005, 'bertscore_recall': 0.9772549867630005, 'bertscore_f1': 0.9772549867630005}
+{'bertscore_precision': 0.9773, 'bertscore_recall': 0.9773, 'bertscore_f1': 0.9773}
+
+# Bleu Score Evaluation
+> bleu_score_evaluation(predictions, references)
+{'bleu_score': 0.3656}
 
 # Cosine Similarity Evaluation
 > cosine_similarity_evaluation(predictions, references)
-{'cosine_similarity': 0.7443363666534424}
+{'cosine_similarity': 0.7443}
 
-# RougeScore Evaluation
+# Rouge Score Evaluation
 > rouge_evaluation(predictions, references)
-{'rouge1': 0.8125, 'rouge2': 0.6428571428571428, 'rougeL': 0.8125}
+{'rouge1': 0.8125, 'rouge2': 0.6429, 'rougeL': 0.8125}
 
 # All-in-one function
-> text_evaluation(predictions, references, bert=True, cosine=True, rouge=True)
-{'rouge1': 0.8125, 'rouge2': 0.6428571428571428, 'rougeL': 0.8125, 'bertscore_precision': 0.9772549867630005, 'bertscore_recall': 0.9772549867630005, 'bertscore_f1': 0.9772549867630005, 'cosine_similarity': 0.7443363666534424}
+> text_evaluation(predictions, references)
+{'bertscore_precision': 0.9773, 'bertscore_recall': 0.9773, 'bertscore_f1': 0.9773, 'bleu_score': 0.3656, 'cosine_similarity': 0.7443, 'rouge1': 0.8125, 'rouge2': 0.6429, 'rougeL': 0.8125}
 ```
-
----
-
-> **Disclaimer**  
-> This is a public fork of a framework originally developed in a research setting.  
-> Institution-specific components have been removed for confidentiality reasons.

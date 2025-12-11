@@ -9,10 +9,9 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from sentence_transformers import SentenceTransformer
-
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
+from sentence_transformers import SentenceTransformer
 
 
 class EncoderWrapper(Embeddings):
@@ -26,14 +25,20 @@ class EncoderWrapper(Embeddings):
 		self,
 		texts: list[str]
 	) -> list[list[float]]:
-		vectors = self.model.encode(texts, task="retrieval", show_progress_bar=False)
+		try:
+			vectors = self.model.encode(texts, task="retrieval", show_progress_bar=False)
+		except TypeError:
+			vectors = self.model.encode(texts, show_progress_bar=False)
 		return vectors.tolist()
 	
 	def embed_query(
 		self,
 		text: str
 	) -> list[float]:
-		vectors = self.model.encode(text, task="retrieval", show_progress_bar=False)
+		try:
+			vectors = self.model.encode(text, task="retrieval", show_progress_bar=False)
+		except TypeError:
+			vectors = self.model.encode(text, show_progress_bar=False)
 		return vectors.tolist()
 
 class VectorDatabase:
