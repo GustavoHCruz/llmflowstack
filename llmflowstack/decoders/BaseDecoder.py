@@ -292,6 +292,7 @@ class BaseDecoder(ABC):
 			warmup_ratio=params.warmup_ratio,
 			lr_scheduler_type="cosine_with_min_lr",
 			lr_scheduler_kwargs={"min_lr_rate": 0.1},
+			label_smoothing_factor=params.label_smoothing_factor,
 			output_dir=None,
 			save_strategy="no",
 			logging_steps=params.logging_steps
@@ -437,6 +438,7 @@ class BaseDecoder(ABC):
 			warmup_ratio=params.warmup_ratio,
 			lr_scheduler_type="cosine_with_min_lr",
 			lr_scheduler_kwargs={"min_lr_rate": 0.1},
+			label_smoothing_factor=params.label_smoothing_factor,
 			output_dir=None,
 			save_strategy="no",
 			logging_steps=params.logging_steps

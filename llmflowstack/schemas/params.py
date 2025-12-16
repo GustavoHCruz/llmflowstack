@@ -17,6 +17,7 @@ class TrainParams:
     "sgd"
   ] = "adamw_torch"
   logging_steps: int = 1
+  label_smoothing_factor: float = 0
 
 @dataclass
 class GenerationBeamsParams:
