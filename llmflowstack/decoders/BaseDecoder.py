@@ -1,11 +1,9 @@
 import gc
-import json
 import os
 import random
 from abc import ABC, abstractmethod
 from logging import getLogger
 from typing import Any, Literal, cast
-from uuid import uuid4
 
 import numpy as np
 import torch
@@ -25,7 +23,6 @@ from llmflowstack.utils.logging import LogLevel
 class BaseDecoder(ABC):
 	model = None
 	tokenizer = None
-	_model_id = None
 	model_is_quantized = None
 	seed = None
 	stop_token_ids = []
@@ -106,9 +103,6 @@ class BaseDecoder(ABC):
 		
 		if quantization:
 			self.model_is_quantized = True
-
-		if not self._model_id:
-			self._create_model_id()
 		
 		stop_tokens = []
 		pad_token_id = getattr(self.tokenizer, "pad_token_id", None)
@@ -130,14 +124,6 @@ class BaseDecoder(ABC):
 			checkpoint=checkpoint,
 			quantization=quantization
 		)
-		with open(os.path.join(checkpoint, "custom_info.json"), "r") as f:
-			data = json.load(f)
-		self._model_id = data.get("model_id", None)
-	
-	def _create_model_id(
-		self
-	) -> None:
-		self._model_id = uuid4()
 
 	def _set_seed(
 		self,
@@ -176,11 +162,6 @@ class BaseDecoder(ABC):
 		self.tokenizer.save_pretrained(path)
 
 		self._log(f"Model and Tokenizer saved at {path}")
-
-		with open(os.path.join(path, "custom_info.json"), "w") as f:
-			json.dump({
-				"model_id": self._model_id
-			}, f)
 
 		self._log(f"Model custom information saved at {path}")
 
@@ -288,6 +269,7 @@ class BaseDecoder(ABC):
 		training_arguments = SFTConfig(
 			num_train_epochs=params.epochs,
 			learning_rate=params.lr,
+			per_device_train_batch_size=params.batch_size,
 			gradient_accumulation_steps=params.gradient_accumulation,
 			warmup_ratio=params.warmup_ratio,
 			lr_scheduler_type="cosine_with_min_lr",
@@ -490,8 +472,6 @@ class BaseDecoder(ABC):
 			torch.cuda.empty_cache()
 			self.model = None
 			self.model_is_quantized = None
-			self.process_id = None
-			self._model_id = None
 			self._log("Reset successfully.")
 		except Exception as e:
 			self._log("Couldn't reset model...", LogLevel.ERROR)
