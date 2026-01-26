@@ -20,7 +20,7 @@ from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
 
 
-class BaseDecoder(ABC):
+class BaseInstructDecoder(ABC):
 	model = None
 	tokenizer = None
 	model_is_quantized = None
@@ -271,6 +271,7 @@ class BaseDecoder(ABC):
 			learning_rate=params.lr,
 			per_device_train_batch_size=params.batch_size,
 			gradient_accumulation_steps=params.gradient_accumulation,
+			gradient_checkpointing=True,
 			warmup_ratio=params.warmup_ratio,
 			lr_scheduler_type="cosine_with_min_lr",
 			lr_scheduler_kwargs={"min_lr_rate": 0.1},
@@ -318,21 +319,19 @@ class BaseDecoder(ABC):
 		if self.model is None or self.tokenizer is None:
 			raise MissingEssentialProp("Model or Tokenizer missing")
 
-		encoded_input = self.tokenizer(
-			input_text
-		)
-		encoded_expected = self.tokenizer(
-			expected_text
-		)
+		prompt_text = input_text
+		full_text = input_text + (expected_text or "")
 
-		input_ids = torch.tensor(encoded_expected["input_ids"], dtype=torch.long)
-		attention_mask = torch.tensor(encoded_expected["attention_mask"], dtype=torch.bool)
+		encoded_prompt = self.tokenizer(prompt_text)
+		encoded_full = self.tokenizer(full_text)
 
-		labels = torch.full_like(input_ids, -100)
+		input_ids = torch.tensor(encoded_full["input_ids"], dtype=torch.long)
+		attention_mask = torch.tensor(encoded_full["attention_mask"], dtype=torch.bool)
 
-		start = len(cast(list, encoded_input["input_ids"]))
+		labels = input_ids.clone()
+		prompt_len = len(cast(list, encoded_prompt["input_ids"]))
 
-		labels[start:] = input_ids[start:]
+		labels[:prompt_len] = -100
 
 		return input_ids, attention_mask, labels
 
@@ -358,17 +357,17 @@ class BaseDecoder(ABC):
 
 	def _build_input_for_fine_tune(
 		self,
-		input: dict
+		data: Any
 	) -> dict[Literal["partial", "complete"], str | BatchEncoding]:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		partial = self._build_input({
-			**input,
-			"expected_answer": None
-		})
+		partial_input = data
+		partial_input.expected_answer = None
 
-		complete = self._build_input(input)
+		partial = self._build_input(partial_input)
+
+		complete = self._build_input(data)
 
 		return {
 			"partial": partial,
@@ -382,7 +381,7 @@ class BaseDecoder(ABC):
 		output = []
 		for data in dataset:
 			builded_inputs = self._build_input_for_fine_tune(
-				input=data
+				data=data
 			)
 			output.append(builded_inputs)
 
@@ -413,10 +412,11 @@ class BaseDecoder(ABC):
 			params = TrainParams()
 
 		training_arguments = SFTConfig(
-			learning_rate=params.lr,
-			gradient_checkpointing=True,
 			num_train_epochs=params.epochs,
+			learning_rate=params.lr,
+			per_device_train_batch_size=params.batch_size,
 			gradient_accumulation_steps=params.gradient_accumulation,
+			gradient_checkpointing=True,
 			warmup_ratio=params.warmup_ratio,
 			lr_scheduler_type="cosine_with_min_lr",
 			lr_scheduler_kwargs={"min_lr_rate": 0.1},

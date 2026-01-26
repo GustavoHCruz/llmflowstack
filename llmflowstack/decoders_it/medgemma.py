@@ -1,7 +1,8 @@
 import threading
+from dataclasses import dataclass
 from functools import partial
 from time import time
-from typing import Iterator, Literal, TypedDict, cast
+from typing import Iterator, Literal, cast
 
 import torch
 from transformers import (AutoTokenizer, StoppingCriteriaList,
@@ -10,19 +11,20 @@ from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
 from llmflowstack.callbacks.stop_on_token import StopOnToken
-from llmflowstack.decoders.BaseDecoder import BaseDecoder
+from llmflowstack.decoders_it.base_instruct_decoder import BaseInstructDecoder
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.generation_utils import create_generation_params
 from llmflowstack.utils.logging import LogLevel
 
 
-class MedGemmaInput(TypedDict):
+@dataclass
+class Input:
 	input_text: str
-	expected_answer: str | None
-	system_message: str | None
+	expected_answer: str | None = None
+	system_message: str | None = None
 
-class MedGemma(BaseDecoder):
+class MedGemma(BaseInstructDecoder):
 	model: Gemma3ForCausalLM | None = None
 	can_think = False
 	question_fields = ["input_text", "system_message"]
@@ -78,12 +80,12 @@ class MedGemma(BaseDecoder):
 
 	def _build_input(
 		self,
-		data: MedGemmaInput
+		data: Input
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		system_message = data.get("system_message", "")
+		system_message = data.system_message or ""
 		if not system_message:
 			system_message = ""
 		if self.can_think:
@@ -92,12 +94,12 @@ class MedGemma(BaseDecoder):
 		if system_message:
 			system_message = f"{system_message}\n"
 
-		expected_answer = data.get("expected_answer")
+		expected_answer = data.expected_answer
 		answer = f"{expected_answer}<end_of_turn>" if expected_answer else ""
 	
 		return (
 			f"<start_of_turn>user"
-			f"{system_message}\n{data["input_text"]}<end_of_turn>\n"
+			f"{system_message}\n{data.input_text}<end_of_turn>\n"
 			f"<start_of_turn>model\n"
 			f"{answer}"
 		)
@@ -107,22 +109,22 @@ class MedGemma(BaseDecoder):
 		input_text: str,
 		expected_answer: str | None = None,
 		system_message: str | None = None
-	) -> MedGemmaInput:
+	) -> Input:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		return {
-			"input_text": input_text,
-			"expected_answer": expected_answer,
-			"system_message": system_message
-		}
+		return Input(
+			input_text=input_text,
+			expected_answer=expected_answer,
+			system_message=system_message
+		)
 
 	def set_can_think(self, value: bool) -> None:
 		self.can_think = value
 
 	def generate(
 		self,
-		input: MedGemmaInput | str,
+		input: Input | str,
 		params: GenerationParams | None = None,
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
@@ -190,7 +192,7 @@ class MedGemma(BaseDecoder):
 	
 	def generate_stream(
 		self,
-		input: MedGemmaInput | str,
+		input: Input | str,
 		params: GenerationParams | None = None
 	) -> Iterator[str]:
 		if self.model is None or self.tokenizer is None:

@@ -1,7 +1,8 @@
 import threading
+from dataclasses import dataclass
 from functools import partial
 from time import time
-from typing import Iterator, Literal, TypedDict, cast
+from typing import Iterator, Literal, cast
 
 import torch
 from transformers import (AutoTokenizer, StoppingCriteriaList,
@@ -10,19 +11,20 @@ from transformers.models.llama import LlamaForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
 from llmflowstack.callbacks.stop_on_token import StopOnToken
-from llmflowstack.decoders.BaseDecoder import BaseDecoder
+from llmflowstack.decoders_it.base_instruct_decoder import BaseInstructDecoder
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.generation_utils import create_generation_params
 from llmflowstack.utils.logging import LogLevel
 
 
-class LLaMA3Input(TypedDict):
+@dataclass
+class Input:
 	input_text: str
-	expected_answer: str | None
-	system_message: str | None
+	expected_answer: str | None = None
+	system_message: str | None = None
 
-class LLaMA3(BaseDecoder):
+class Llama_3_it(BaseInstructDecoder):
 	model: LlamaForCausalLM | None = None
 	question_fields = ["input_text", "system_message"]
 	answer_fields = ["expected_answer"]
@@ -81,19 +83,19 @@ class LLaMA3(BaseDecoder):
 
 	def _build_input(
 		self,
-		data: LLaMA3Input
+		data: Input
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		expected_answer = data.get("expected_answer")
+		expected_answer = data.expected_answer
 		answer = f"{expected_answer}{self.tokenizer.eos_token}" if expected_answer else ""
 
-		system_message = data.get("system_message", "")
+		system_message = data.system_message or ""
 
 		return (
 			f"<|start_header_id|>system<|end_header_id|>{system_message}\n"
-			f"<|eot_id|><|start_header_id|>user<|end_header_id|>{data["input_text"]}\n"
+			f"<|eot_id|><|start_header_id|>user<|end_header_id|>{data.input_text}\n"
 			f"<|eot_id|><|start_header_id|>assistant<|end_header_id|>{answer}"
 		)
 
@@ -102,19 +104,19 @@ class LLaMA3(BaseDecoder):
 		input_text: str,
 		system_message: str | None = None,
 		expected_answer: str | None = None
-	) -> LLaMA3Input:
+	) -> Input:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		return {
-			"input_text": input_text,
-			"system_message": system_message,
-			"expected_answer": expected_answer
-		}
+		return Input(
+			input_text=input_text,
+			system_message=system_message,
+			expected_answer=expected_answer
+		)
 
 	def generate(
 		self,
-		input: LLaMA3Input | str,
+		input: Input | str,
 		params: GenerationParams | None = None
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
@@ -179,7 +181,7 @@ class LLaMA3(BaseDecoder):
 	
 	def generate_stream(
 		self,
-		input: LLaMA3Input | str,
+		input: Input | str,
 		params: GenerationParams | None = None
 	) -> Iterator[str]:
 		if self.model is None or self.tokenizer is None:

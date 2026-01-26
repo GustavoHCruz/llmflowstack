@@ -1,41 +1,46 @@
 import threading
+from dataclasses import dataclass
 from functools import partial
 from time import time
-from typing import Iterator, TypedDict, cast
+from typing import Iterator, Literal, cast
 
 import torch
 from transformers import (AutoTokenizer, DataCollatorForLanguageModeling,
                           StoppingCriteriaList, TextIteratorStreamer, Trainer,
                           TrainingArguments)
-from transformers.models.llama4 import Llama4ForCausalLM
+from transformers.models.gemma3 import Gemma3ForCausalLM
+from transformers.utils.quantization_config import BitsAndBytesConfig
 
 from llmflowstack.callbacks.log_collector import LogCollectorCallback
 from llmflowstack.callbacks.stop_on_token import StopOnToken
-from llmflowstack.decoders.BaseDecoder import BaseDecoder
+from llmflowstack.decoders_it.base_instruct_decoder import BaseInstructDecoder
 from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.generation_utils import create_generation_params
 from llmflowstack.utils.logging import LogLevel
 
 
-class LLaMA4Input(TypedDict):
+@dataclass
+class Input:
 	input_text: str
-	expected_answer: str | None
-	system_message: str | None
+	expected_answer: str | None = None
+	system_message: str | None = None
+	image_paths: list[str] | None = None
 
-class LLaMA4(BaseDecoder):
-	model: Llama4ForCausalLM | None = None
+class Gemma_3(BaseInstructDecoder):
+	model: Gemma3ForCausalLM | None = None
 	question_fields = ["input_text", "system_message"]
 	answer_fields = ["expected_answer"]
 
 	def __init__(
 		self,
 		checkpoint: str | None = None,
+		quantization: Literal["4bit"] | None = None,
 		seed: int | None = None
 	) -> None:
 		return super().__init__(
 			checkpoint=checkpoint,
-			quantization=None,
+			quantization=quantization,
 			seed=seed
 		)
 
@@ -46,16 +51,23 @@ class LLaMA4(BaseDecoder):
 		if not self.tokenizer:
 			self._log("Could not set stop tokens - generation may not work...", LogLevel.WARNING)
 			return None
-		particular_tokens = self.tokenizer.encode("<|eot|>")
+		particular_tokens = self.tokenizer.encode("<end_of_turn>")
 		self.stop_token_ids = tokens + particular_tokens
 
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: None = None
+		quantization: Literal["4bit"] | None = None
 	) -> None:
-		self.model = Llama4ForCausalLM.from_pretrained(
+		quantization_config = None
+		if quantization == "4bit":
+			quantization_config = BitsAndBytesConfig(
+				load_in_4bit=True
+			)
+
+		self.model = Gemma3ForCausalLM.from_pretrained(
 			checkpoint,
+			quantization_config=quantization_config,
 			dtype="auto",
 			device_map="auto",
 			attn_implementation="eager"
@@ -64,33 +76,31 @@ class LLaMA4(BaseDecoder):
 	def load_checkpoint(
 		self,
 		checkpoint: str,
-		quantization: None = None
+		quantization: Literal['4bit'] | None = None
 	) -> None:
 		return super().load_checkpoint(checkpoint, quantization)
 
 	def _build_input(
 		self,
-		data: LLaMA4Input
+		data: Input
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		system_message = data.get("system_message", "")
+		system_message = data.system_message or ""
 		if not system_message:
 			system_message = ""
 
 		if system_message:
-			system_message = f"<|header_start|>system<|header_end|>\n\n{system_message}<|eot|>"
+			system_message = f"{system_message}\n"
 
-		expected_answer = data.get("expected_answer")
-		answer = "<|header_start|>assistant<|header_end|>\n\n"
-		answer += f"{expected_answer}<|eot|>" if expected_answer else ""
-
+		expected_answer = data.expected_answer
+		answer = f"{expected_answer}<end_of_turn>" if expected_answer else ""
+	
 		return (
-			"<|begin_of_text|>"
-			f"{system_message}"
-			"<|header_start|>user<|header_end|>\n\n"
-			f"{data["input_text"]}<|eot|>"
+			f"<start_of_turn>user"
+			f"{system_message}\n{data.input_text}<end_of_turn>\n"
+			f"<start_of_turn>model\n"
 			f"{answer}"
 		)
 
@@ -98,16 +108,18 @@ class LLaMA4(BaseDecoder):
 		self,
 		input_text: str,
 		system_message: str | None = None,
-		expected_answer: str | None = None
-	) -> LLaMA4Input:
+		expected_answer: str | None = None,
+		image_paths: list[str] | None = None
+	) -> Input:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		return {
-			"input_text": input_text,
-			"system_message": system_message,
-			"expected_answer": expected_answer
-		}
+		return Input(
+			input_text=input_text,
+			system_message=system_message,
+			expected_answer=expected_answer,
+			image_paths=image_paths
+		)
 	
 	def dapt(
 		self,
@@ -124,10 +136,10 @@ class LLaMA4(BaseDecoder):
 			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", LogLevel.WARNING)
 			return None
 
-		self._log("Starting DAPT")
+		self._log("Starting Training")
 
 		if self.model_is_quantized:
-			self._log("Cannot DAPT a quantized model.", LogLevel.WARNING)
+			self._log("Cannot traub a quantized model.", LogLevel.WARNING)
 			return None
 		
 		if params is None:
@@ -174,7 +186,7 @@ class LLaMA4(BaseDecoder):
 				path=save_path
 			)
 
-		self._log("Finished DAPT")
+		self._log("Finished Training")
 	
 	def fine_tune(
 		self,
@@ -195,14 +207,12 @@ class LLaMA4(BaseDecoder):
 
 	def generate(
 		self,
-		input: LLaMA4Input | str,
-		params: GenerationParams | None = None
+		input: Input | str,
+		params: GenerationParams | None = None,
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
 			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			return None
-
-		self.model
 
 		self._log(f"Processing received input...'")
 
@@ -213,10 +223,6 @@ class LLaMA4(BaseDecoder):
 
 		generation_params = create_generation_params(params)
 		self.model.generation_config = generation_params
-
-		if params:
-			generation_params = create_generation_params(params)
-			self.model.generation_config = generation_params
 
 		model_input = None
 		if isinstance(input, str):
@@ -236,7 +242,6 @@ class LLaMA4(BaseDecoder):
 
 		self.model.eval()
 		self.model.gradient_checkpointing_disable()
-
 		start = time()
 
 		with torch.no_grad():
@@ -259,7 +264,7 @@ class LLaMA4(BaseDecoder):
 	
 	def generate_stream(
 		self,
-		input: LLaMA4Input | str,
+		input: Input | str,
 		params: GenerationParams | None = None
 	) -> Iterator[str]:
 		if self.model is None or self.tokenizer is None:
@@ -269,7 +274,7 @@ class LLaMA4(BaseDecoder):
 			return
 		
 		self._log(f"Processing received input...'")
-		
+
 		if params is None:
 			params = GenerationParams(max_new_tokens=32768)
 		elif params.max_new_tokens is None:
