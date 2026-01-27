@@ -1,9 +1,13 @@
+from __future__ import annotations
+
+import dataclasses
 import gc
 import os
 import random
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from logging import getLogger
-from typing import Any, Literal, cast
+from typing import Any, Generic, Iterator, Literal, TypeVar, cast
 
 import numpy as np
 import torch
@@ -17,10 +21,18 @@ from trl.trainer.sft_trainer import SFTTrainer
 from llmflowstack.callbacks.log_collector import LogCollectorCallback
 from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
+from llmflowstack.utils.generation_utils import create_generation_params
 from llmflowstack.utils.logging import LogLevel
 
 
-class BaseInstructDecoder(ABC):
+@dataclass
+class BaseInstructInput:
+	input_text: str
+	expected_answer: str | None
+
+TInput = TypeVar("TInput", bound="BaseInstructInput")
+
+class BaseInstructDecoder(ABC, Generic[TInput]):
 	model = None
 	tokenizer = None
 	model_is_quantized = None
@@ -28,6 +40,7 @@ class BaseInstructDecoder(ABC):
 	stop_token_ids = []
 	question_fields = []
 	answer_fields = []
+	max_new_tokens = 1024
 
 	def __init__(
 		self,
@@ -115,16 +128,6 @@ class BaseInstructDecoder(ABC):
 		self._set_generation_stopping_tokens(stop_tokens)
 		self.stop_token_ids = list(set(self.stop_token_ids))
 
-	def from_pretrained(
-		self,
-		checkpoint: str,
-		quantization: Literal["8bit", "4bit"] | bool | None = None
-	) -> None:
-		self.load_checkpoint(
-			checkpoint=checkpoint,
-			quantization=quantization
-		)
-
 	def _set_seed(
 		self,
 		seed: int
@@ -175,9 +178,15 @@ class BaseInstructDecoder(ABC):
 	@abstractmethod
 	def _build_input(
 		self,
-		*args: Any,
-		**kwargs: Any
-	) -> str | BatchEncoding:
+		data: TInput
+	) -> str:
+		pass
+
+	@abstractmethod
+	def build_input(
+		self,
+		input_text: str
+	) -> TInput:
 		pass
 
 	def _tokenize(
@@ -231,7 +240,7 @@ class BaseInstructDecoder(ABC):
 
 	def _promptfy_dataset_for_dapt(
 		self,
-		dataset: list[dict[str, str | None]]
+		dataset: list[TInput]
 	) -> list[str]:
 		output = []
 		for data in dataset:
@@ -244,9 +253,9 @@ class BaseInstructDecoder(ABC):
 
 	def dapt(
 		self,
-		train_dataset: list[Any],
+		train_dataset: list[TInput],
 		params: TrainParams | None = None,
-		eval_dataset: list[Any] | None = None,
+		eval_dataset: list[TInput] | None = None,
 		save_at_end = True,
 		save_path: str | None = None
 	) -> None:
@@ -319,19 +328,21 @@ class BaseInstructDecoder(ABC):
 		if self.model is None or self.tokenizer is None:
 			raise MissingEssentialProp("Model or Tokenizer missing")
 
-		prompt_text = input_text
-		full_text = input_text + (expected_text or "")
+		encoded_input = self.tokenizer(
+			input_text
+		)
+		encoded_expected = self.tokenizer(
+			expected_text
+		)
 
-		encoded_prompt = self.tokenizer(prompt_text)
-		encoded_full = self.tokenizer(full_text)
+		input_ids = torch.tensor(encoded_expected["input_ids"], dtype=torch.long)
+		attention_mask = torch.tensor(encoded_expected["attention_mask"], dtype=torch.bool)
 
-		input_ids = torch.tensor(encoded_full["input_ids"], dtype=torch.long)
-		attention_mask = torch.tensor(encoded_full["attention_mask"], dtype=torch.bool)
+		labels = torch.full_like(input_ids, -100)
 
-		labels = input_ids.clone()
-		prompt_len = len(cast(list, encoded_prompt["input_ids"]))
+		start = len(cast(list, encoded_input["input_ids"]))
 
-		labels[:prompt_len] = -100
+		labels[start:] = input_ids[start:]
 
 		return input_ids, attention_mask, labels
 
@@ -357,13 +368,12 @@ class BaseInstructDecoder(ABC):
 
 	def _build_input_for_fine_tune(
 		self,
-		data: Any
+		data: TInput
 	) -> dict[Literal["partial", "complete"], str | BatchEncoding]:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		partial_input = data
-		partial_input.expected_answer = None
+		partial_input = dataclasses.replace(data, expected_answer=None)
 
 		partial = self._build_input(partial_input)
 
@@ -376,7 +386,7 @@ class BaseInstructDecoder(ABC):
 
 	def _promptfy_dataset_for_fine_tune(
 		self,
-		dataset: list[Any]
+		dataset: list[TInput]
 	) -> list[dict[Literal["partial", "complete"], str]]:
 		output = []
 		for data in dataset:
@@ -389,9 +399,9 @@ class BaseInstructDecoder(ABC):
 
 	def fine_tune(
 		self,
-		train_dataset: list[Any],
+		train_dataset: list[TInput],
 		params: TrainParams | None = None,
-		eval_dataset: list[Any] | None = None,
+		eval_dataset: list[TInput] | None = None,
 		save_at_end = True,
 		save_path: str | None = None
 	) -> None:
@@ -456,12 +466,53 @@ class BaseInstructDecoder(ABC):
 
 		self._log("Finished fine-tune")
 
+	def _prepare_generation(
+		self,
+		input: TInput | str,
+		params: GenerationParams | None,
+	) -> tuple[Tensor, Tensor] | None:
+		if self.model is None or self.tokenizer is None:
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
+			return None
+
+		self._log(f"Processing received input...'")
+
+		if params is None:
+			params = GenerationParams(max_new_tokens=self.max_new_tokens)
+		elif params.max_new_tokens is None:
+			params.max_new_tokens = self.max_new_tokens
+
+		self.model.generation_config = create_generation_params(params)
+
+		model_input = None
+		if isinstance(input, str):
+			model_input = self.build_input(
+				input_text=input
+			)
+			model_input = self._build_input(
+				data=model_input
+			)
+		else:
+			model_input = self._build_input(
+				data=input
+			)
+
+		return self._tokenize(model_input)
+
 	@abstractmethod
 	def generate(
 		self,
-		input: Any,
+		input: TInput | str,
 		params: GenerationParams | None = None
 	) -> str | None:
+		pass
+
+	@abstractmethod
+	def generate_stream(
+		self,
+		input: TInput | str,
+		params: GenerationParams | None = None
+	) -> Iterator[str]:
 		pass
 
 	def unload_model(self) -> None:

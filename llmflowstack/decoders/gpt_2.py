@@ -91,14 +91,14 @@ class GPT_2(BaseDecoder):
 
 		with torch.no_grad():
 			outputs = self.model.generate(
-				input_ids=input_ids,
-				attention_mask=attention_mask,
+				input_ids=input_ids.unsqueeze(0),
+				attention_mask=attention_mask.unsqueeze(0),
 				use_cache=True,
 				eos_token_id=None,
 				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 			)
 
-		answer = self.tokenizer.decode(outputs[0][len(input_ids):])
+		answer = self.tokenizer.decode(outputs[0][len(input_ids):], skip_special_tokens=True)
 
 		end = time()
 		total_time = end - start
@@ -141,8 +141,8 @@ class GPT_2(BaseDecoder):
 
 		generate_fn = partial(
 			self.model.generate,
-			input_ids=input_ids,
-			attention_mask=attention_mask,
+			input_ids=input_ids.unsqueeze(0),
+			attention_mask=attention_mask.unsqueeze(0),
 			use_cache=True,
 			eos_token_id=None,
 			streamer=streamer,

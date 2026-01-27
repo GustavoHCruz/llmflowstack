@@ -117,16 +117,6 @@ class BaseDecoder(ABC):
 		self._set_generation_stopping_tokens(stop_tokens)
 		self.stop_token_ids = list(set(self.stop_token_ids))
 
-	def from_pretrained(
-		self,
-		checkpoint: str,
-		quantization: Literal["8bit", "4bit"] | bool | None = None
-	) -> None:
-		self.load_checkpoint(
-			checkpoint=checkpoint,
-			quantization=quantization
-		)
-
 	def _set_seed(
 		self,
 		seed: int
@@ -200,22 +190,27 @@ class BaseDecoder(ABC):
 				"input_ids": input_ids,
 				"attention_mask": attention_mask
 			}
+		
+		eos = self.tokenizer.eos_token
+
+		if isinstance(eos, list):
+			eos = eos[0]
+		if not isinstance(eos, str):
+			eos = "<|eos|>"
+
+		full_text = data.input_text + (data.expected_text or "") + eos
+		encoded_full = self.tokenizer(full_text)
 
 		if mode == "dapt":
-			input_text = data.input_text + (data.expected_text or "")
-			tokenized = self.tokenizer(input_text)
-			input_ids = torch.tensor(tokenized["input_ids"], dtype=torch.long)
-			attention_mask = torch.tensor(tokenized["attention_mask"], dtype=torch.long)
+			input_ids = torch.tensor(encoded_full["input_ids"], dtype=torch.long)
+			attention_mask = torch.tensor(encoded_full["attention_mask"], dtype=torch.long)
 			return {
 				"input_ids": input_ids,
 				"attention_mask": attention_mask
 			}
 
 		prompt_text = data.input_text
-		full_text = data.input_text + (data.expected_text or "")
-
 		encoded_prompt = self.tokenizer(prompt_text)
-		encoded_full = self.tokenizer(full_text)
 
 		input_ids = torch.tensor(encoded_full["input_ids"], dtype=torch.long)
 		attention_mask = torch.tensor(encoded_full["attention_mask"], dtype=torch.bool)

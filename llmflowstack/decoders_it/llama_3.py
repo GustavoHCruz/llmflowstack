@@ -11,23 +11,22 @@ from transformers.models.llama import LlamaForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
 from llmflowstack.callbacks.stop_on_token import StopOnToken
-from llmflowstack.decoders_it.base_instruct_decoder import BaseInstructDecoder
+from llmflowstack.decoders_it.base_instruct_decoder import (
+    BaseInstructDecoder, BaseInstructInput)
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
-from llmflowstack.utils.generation_utils import create_generation_params
 from llmflowstack.utils.logging import LogLevel
 
 
 @dataclass
-class Input:
-	input_text: str
-	expected_answer: str | None = None
+class Input(BaseInstructInput):
 	system_message: str | None = None
 
 class Llama_3_it(BaseInstructDecoder):
 	model: LlamaForCausalLM | None = None
 	question_fields = ["input_text", "system_message"]
 	answer_fields = ["expected_answer"]
+	max_new_tokens = 8192
 
 	def __init__(
 		self,
@@ -122,45 +121,21 @@ class Llama_3_it(BaseInstructDecoder):
 		if self.model is None or self.tokenizer is None:
 			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			return None
+		
+		prep = self._prepare_generation(
+			input,
+			params=params
+		)
 
-		self.model
-
-		self._log(f"Processing received input...'")
-
-		if params is None:
-			params = GenerationParams(max_new_tokens=8192)
-		elif params.max_new_tokens is None:
-			params.max_new_tokens = 8192
-
-		generation_params = create_generation_params(params)
-		self.model.generation_config = generation_params
-
-		if params:
-			generation_params = create_generation_params(params)
-			self.model.generation_config = generation_params
-
-		model_input = None
-		if isinstance(input, str):
-			model_input = self.build_input(
-				input_text=input
-			)
-			model_input = self._build_input(
-				data=model_input
-			)
-		else:
-			model_input = self._build_input(
-				data=input
-			)
-
-		tokenized_input = self._tokenize(model_input)
-
-		input_ids, attention_mask = tokenized_input
+		if prep is None:
+			return None
+		
+		input_ids, attention_mask = prep
 
 		self.model.eval()
 		self.model.gradient_checkpointing_disable()
 
 		start = time()
-
 		with torch.no_grad():
 			outputs = self.model.generate(
 				input_ids=input_ids,
@@ -190,31 +165,15 @@ class Llama_3_it(BaseInstructDecoder):
 				yield ""
 			return
 		
-		self._log(f"Processing received input...'")
-		
-		if params is None:
-			params = GenerationParams(max_new_tokens=8192)
-		elif params.max_new_tokens is None:
-			params.max_new_tokens = 8192
+		prep = self._prepare_generation(
+			input,
+			params=params
+		)
 
-		generation_params = create_generation_params(params)
-		self.model.generation_config = generation_params
-
-		model_input = None
-		if isinstance(input, str):
-			model_input = self.build_input(
-				input_text=input
-			)
-			model_input = self._build_input(
-				data=model_input
-			)
-		else:
-			model_input = self._build_input(
-				data=input
-			)
+		if prep is None:
+			return None
 		
-		tokenized_input = self._tokenize(model_input)
-		input_ids, attention_mask = tokenized_input
+		input_ids, attention_mask = prep
 
 		streamer = TextIteratorStreamer(
 			cast(AutoTokenizer, self.tokenizer),
