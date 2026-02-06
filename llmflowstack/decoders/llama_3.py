@@ -4,12 +4,10 @@ from time import time
 from typing import Iterator, Literal, cast
 
 import torch
-from transformers import (AutoTokenizer, StoppingCriteriaList,
-                          TextIteratorStreamer)
+from transformers import AutoTokenizer, TextIteratorStreamer
 from transformers.models.llama import LlamaForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
-from llmflowstack.callbacks.stop_on_token import StopOnToken
 from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
@@ -63,8 +61,7 @@ class Llama3(BaseDecoder):
 			checkpoint,
 			quantization_config=quantization_config,
 			dtype="auto",
-			device_map="auto",
-			attn_implementation="eager"
+			device_map="auto"
 		)
 	
 	def load_checkpoint(
@@ -136,8 +133,8 @@ class Llama3(BaseDecoder):
 				input_ids=input_ids,
 				attention_mask=attention_mask,
 				use_cache=True,
-				eos_token_id=None,
-				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+				eos_token_id=self.stop_token_ids,
+				pad_token_id=self.tokenizer.pad_token_id
 			)
 
 		end = time()
@@ -189,9 +186,9 @@ class Llama3(BaseDecoder):
 			input_ids=input_ids,
 			attention_mask=attention_mask,
 			use_cache=True,
-			eos_token_id=None,
-			streamer=streamer,
-			stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+			eos_token_id=self.stop_token_ids,
+			pad_token_id=self.tokenizer.pad_token_id,
+			streamer=streamer
 		)
 		
 		start = time()

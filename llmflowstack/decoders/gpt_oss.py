@@ -4,12 +4,10 @@ from time import time
 from typing import Iterator, Literal, cast
 
 import torch
-from transformers import (AutoTokenizer, StoppingCriteriaList,
-                          TextIteratorStreamer)
+from transformers import AutoTokenizer, TextIteratorStreamer
 from transformers.models.gpt_oss import GptOssForCausalLM
 from transformers.utils.quantization_config import Mxfp4Config
 
-from llmflowstack.callbacks.stop_on_token import StopOnToken
 from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
@@ -58,16 +56,14 @@ class GptOss(BaseDecoder):
 				checkpoint,
 				quantization_config=quantization_config,
 				dtype="auto",
-				device_map="auto",
-				attn_implementation="eager",
+				device_map="auto"
 			)
 		except Exception as _:
 			self._log("Error trying to load the model. Defaulting to load without quantization...", LogLevel.WARNING)
 			self.model = GptOssForCausalLM.from_pretrained(
 				checkpoint,
 				dtype="auto",
-				device_map="auto",
-				attn_implementation="eager"
+				device_map="auto"
 			)
 	
 	def load_checkpoint(
@@ -165,8 +161,8 @@ class GptOss(BaseDecoder):
 				input_ids=input_ids,
 				attention_mask=attention_mask,
 				use_cache=True,
-				eos_token_id=None,
-				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+				eos_token_id=self.stop_token_ids,
+				pad_token_id=self.tokenizer.pad_token_id
 			)
 
 		answer = self.tokenizer.decode(outputs[0])
@@ -225,9 +221,9 @@ class GptOss(BaseDecoder):
 			input_ids=input_ids,
 			attention_mask=attention_mask,
 			use_cache=True,
-			eos_token_id=None,
-			streamer=streamer,
-			stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+			eos_token_id=self.stop_token_ids,
+			pad_token_id=self.tokenizer.pad_token_id,
+			streamer=streamer
 		)
 
 		start = time()

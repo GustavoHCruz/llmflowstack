@@ -1,14 +1,13 @@
 import threading
 from functools import partial
 from time import time
-from typing import Iterator, Literal, cast
+from typing import Iterator, cast
 
 import torch
 from transformers import (AutoTokenizer, BitsAndBytesConfig,
-                          StoppingCriteriaList, TextIteratorStreamer)
+                          TextIteratorStreamer)
 from transformers.models.gpt2 import GPT2LMHeadModel
 
-from llmflowstack.callbacks.stop_on_token import StopOnToken
 from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.logging import LogLevel
@@ -109,8 +108,7 @@ class Gpt2(BaseDecoder):
 				input_ids=input_ids,
 				attention_mask=attention_mask,
 				use_cache=True,
-				eos_token_id=None,
-				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+				eos_token_id=self.stop_token_ids
 			)
 
 		answer = self.tokenizer.decode(outputs[0][input_ids.shape[-1]:], skip_special_tokens=True)
@@ -159,9 +157,9 @@ class Gpt2(BaseDecoder):
 			input_ids=input_ids,
 			attention_mask=attention_mask,
 			use_cache=True,
-			eos_token_id=None,
-			streamer=streamer,
-			stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
+			eos_token_id=self.stop_token_ids,
+			pad_token_id=self.tokenizer.pad_token_id,
+			streamer=streamer
 		)
 
 		start = time()

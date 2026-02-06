@@ -60,6 +60,9 @@ class BaseDecoder(ABC):
 				checkpoint=checkpoint,
 				quantization=quantization
 			)
+
+			if quantization:
+				self.model_is_quantized = True
 	
 	def _log(
 		self,
