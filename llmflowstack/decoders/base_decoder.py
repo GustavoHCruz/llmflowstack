@@ -4,26 +4,29 @@ import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from logging import getLogger
-from typing import Any, Literal, cast
+from typing import Any, Iterator, Literal
 
 import numpy as np
 import torch
 from datasets import Dataset
-from torch import Tensor
-from transformers import AutoTokenizer, PreTrainedTokenizerBase
+from torch import Tensor, tensor
+from transformers import AutoTokenizer, PreTrainedTokenizerBase, Trainer
+from transformers.tokenization_utils_base import BatchEncoding
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
 from llmflowstack.callbacks.log_collector import LogCollectorCallback
-from llmflowstack.schemas.params import TrainParams
+from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
 
 
 @dataclass
-class Input:
-	input_text: str
-	expected_text: str | None = None
+class ModelInput:
+	input_ids: Tensor
+	attention_mask: Tensor
+	ft_labels: Tensor
+	dapt_labels: Tensor
 
 class BaseDecoder(ABC):
 	model = None
@@ -33,6 +36,8 @@ class BaseDecoder(ABC):
 	stop_token_ids = []
 	question_fields = []
 	answer_fields = []
+	max_context_len: int = 1024
+	legacy_trainer = False
 
 	def __init__(
 		self,
@@ -164,76 +169,122 @@ class BaseDecoder(ABC):
 	) -> None:
 		pass
 
-	def build_input(
+	def _build_generic_input(
 		self,
 		input_text: str,
-		expected_text: str | None = None
-	) -> Input:
-		return Input(
-			input_text=input_text,
-			expected_text=expected_text
-		)
+		output_text: str | None = None
+	) -> str:
+		if self.tokenizer is None:
+			raise MissingEssentialProp("Tokenizer missing")
+		eos = self.tokenizer.eos_token
+
+		output_text = (output_text or "") + str(eos or "") if output_text else ""
+
+		return input_text + output_text
 	
+	@abstractmethod
+	def _build_prompt(
+		self,
+		input_text: str,
+		output_text: str | None = None,
+		*args: Any,
+		**kwargs: Any
+	) -> str:
+		pass
+		
 	def _tokenize(
 		self,
-		data: Input,
-		mode: Literal["inference", "dapt", "ft"] = "inference"
-	) -> dict[str, Tensor]:
+		input_text: str,
+		output_text: str | None = None,
+		follow_prompt_format: bool = True,
+		*args: Any,
+		**kwargs: Any
+	) -> ModelInput:
 		if self.model is None or self.tokenizer is None:
 			raise MissingEssentialProp("Model or Tokenizer missing")
 
-		if mode == "inference":
-			tokenized_input_text = self.tokenizer(data.input_text)
-			input_ids = torch.tensor(tokenized_input_text["input_ids"], dtype=torch.long).to(self.model.device)
-			attention_mask = torch.tensor(tokenized_input_text["attention_mask"]).to(self.model.device)
-			return {
-				"input_ids": input_ids,
-				"attention_mask": attention_mask
-			}
+		if follow_prompt_format:
+			promptfied_input = self._build_prompt(
+				input_text=input_text,
+				output_text=output_text,
+				*args,
+				**kwargs
+			)
+		else:
+			promptfied_input = self._build_generic_input(
+				input_text=input_text,
+				output_text=output_text
+			)
+			
+		tokenized_input: BatchEncoding = self.tokenizer(
+			text=promptfied_input,
+			add_special_tokens=False
+		)
+
+		input_ids = tensor(tokenized_input["input_ids"], dtype=torch.long)
+		attention_mask = tensor(tokenized_input["attention_mask"], dtype=torch.bool)
+	
+		if follow_prompt_format:
+			promptfied_partial_input = self._build_prompt(
+				input_text=input_text,
+				output_text=None,
+				*args,
+				**kwargs
+			)
+		else:
+			promptfied_partial_input = self._build_generic_input(
+				input_text=input_text,
+				output_text=None
+			)
+
+		tokenized_partial_input: BatchEncoding = self.tokenizer(
+			text=promptfied_partial_input,
+			add_special_tokens=False
+		)
+
+		partial_input_ids = tensor(tokenized_partial_input["input_ids"], dtype=torch.long)
+
+		start = int(partial_input_ids.shape[0])
+
+		ft_labels = torch.full_like(input_ids, -100)
+		ft_labels[start:] = input_ids[start:]
+		ft_labels = ft_labels.masked_fill(attention_mask == 0, -100)
+
+		dapt_labels = input_ids.clone().masked_fill(attention_mask == 0, -100)
+
+		return ModelInput(
+			input_ids=input_ids,
+			attention_mask=attention_mask,
+			ft_labels=ft_labels,
+			dapt_labels=dapt_labels
+		)
+	
+	def _build_dataset(
+		self,
+		dataset: list[ModelInput],
+		mode: Literal["FT", "DAPT"]
+	) -> Dataset:
+		if mode == "DAPT":
+			return Dataset.from_list([{
+				"input_ids": data.input_ids,
+				"attention_mask": data.attention_mask,
+				"labels": data.dapt_labels
+			} for data in dataset])
 		
-		eos = self.tokenizer.eos_token
-
-		if isinstance(eos, list):
-			eos = eos[0]
-		if not isinstance(eos, str):
-			eos = "<|eos|>"
-
-		full_text = data.input_text + (data.expected_text or "") + eos
-		encoded_full = self.tokenizer(full_text)
-
-		if mode == "dapt":
-			input_ids = torch.tensor(encoded_full["input_ids"], dtype=torch.long)
-			attention_mask = torch.tensor(encoded_full["attention_mask"], dtype=torch.long)
-			return {
-				"input_ids": input_ids,
-				"attention_mask": attention_mask
-			}
-
-		prompt_text = data.input_text
-		encoded_prompt = self.tokenizer(prompt_text)
-
-		input_ids = torch.tensor(encoded_full["input_ids"], dtype=torch.long)
-		attention_mask = torch.tensor(encoded_full["attention_mask"], dtype=torch.bool)
-
-		labels = input_ids.clone()
-		prompt_len = len(cast(list, encoded_prompt["input_ids"]))
-
-		labels[:prompt_len] = -100
-
-		return {
-			"input_ids": input_ids,
-			"attention_mask": attention_mask,
-			"labels": labels
-		}
-		
+		return Dataset.from_list([{
+			"input_ids": data.input_ids,
+			"attention_mask": data.attention_mask,
+			"labels": data.ft_labels
+		} for data in dataset])
+	
 	def train(
 		self,
-		train_dataset: list[Input],
+		train_data: list[ModelInput],
 		params: TrainParams | None = None,
-		eval_dataset: list[Input] | None = None,
-		mode: Literal["dapt", "ft"] = "dapt",
-		save_at_end = True,
-		save_path: str | None = None	
+		eval_data: list[ModelInput] | None = None,
+		save_at_end = False,
+		save_path: str | None = None,
+		mode: Literal["FT", "DAPT"] = "FT"
 	) -> None:
 		if not self.model:
 			self._log("Could not find a model loaded. Try loading a model first.", LogLevel.WARNING)
@@ -241,25 +292,26 @@ class BaseDecoder(ABC):
 		if not self.tokenizer:
 			self._log("Could not find a tokenizer loaded. Try loading a tokenizer first.", LogLevel.WARNING)
 			return None
-
-		self._log("Starting Training")
-
+		
 		if self.model_is_quantized:
 			self._log("Cannot train a quantized model.", LogLevel.WARNING)
 			return None
-		
+
+		self._log("Starting training...")
+
 		if params is None:
 			params = TrainParams()
-
+		
 		training_arguments = SFTConfig(
 			num_train_epochs=params.epochs,
 			learning_rate=params.lr,
 			per_device_train_batch_size=params.batch_size,
+			per_device_eval_batch_size=params.batch_size,
 			gradient_accumulation_steps=params.gradient_accumulation,
 			gradient_checkpointing=True,
 			warmup_ratio=params.warmup_ratio,
 			lr_scheduler_type="cosine_with_min_lr",
-			lr_scheduler_kwargs={"min_lr_rate": 0.1},
+			lr_scheduler_kwargs = {"min_lr_rate": 0.1},
 			label_smoothing_factor=params.label_smoothing_factor,
 			output_dir=None,
 			save_strategy="no",
@@ -269,18 +321,27 @@ class BaseDecoder(ABC):
 		if self.seed is not None:
 			training_arguments.seed = self.seed
 
-		tokenized_train_dataset = Dataset.from_list([self._tokenize(data, mode) for data in train_dataset])
-
-		tokenized_eval_dataset = None
-		if eval_dataset:
-			tokenized_eval_dataset = Dataset.from_list([self._tokenize(data, mode) for data in eval_dataset])
-
+		train_dataset = self._build_dataset(
+			dataset=train_data,
+			mode=mode
+		)
+		eval_dataset = None
+		if eval_data:
+			eval_dataset = self._build_dataset(
+				dataset=eval_data,
+				mode=mode
+			)
+		
 		log_callback = LogCollectorCallback()
 
-		trainer = SFTTrainer(
+		trainer = SFTTrainer
+		if self.legacy_trainer:
+			trainer = Trainer
+		
+		trainer = trainer(
 			model=self.model,
-			train_dataset=tokenized_train_dataset,
-			eval_dataset=tokenized_eval_dataset,
+			train_dataset=train_dataset,
+			eval_dataset=eval_dataset,
 			args=training_arguments,
 			callbacks=[log_callback]
 		)
@@ -291,8 +352,72 @@ class BaseDecoder(ABC):
 			self.save_checkpoint(
 				path=save_path
 			)
+		
+		self._log("Finished training")
 
-		self._log("Finished Training")
+	def _prepare_generation(
+		self,
+		data: ModelInput | str,
+		params: GenerationParams | None = None,
+		follow_prompt_format: bool = True
+	) -> ModelInput | None:
+		if self.model is None or self.tokenizer is None:
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
+			return None
+
+		self._log(f"Processing received input...'")
+
+		if isinstance(data, str):
+			model_input = self._tokenize(
+				input_text=data,
+				follow_prompt_format=follow_prompt_format
+			)
+		else:
+			model_input = data
+
+		input_tokens_len = model_input.input_ids.shape[-1]
+
+		if params is None:
+			params = GenerationParams()
+		
+		requested_tokens = params.max_new_tokens
+		available_tokens = self.max_context_len - input_tokens_len
+
+		if available_tokens <= 0:
+			raise ValueError(f"Could not generate new tokens, input of {input_tokens_len} tokens exceeds or euqals max model context window ({self.max_context_len})")
+
+		if requested_tokens is None:
+			max_new_tokens = max(0, available_tokens)
+		else:
+			max_new_tokens = min(
+				requested_tokens,
+				max(0, available_tokens)
+			)
+		
+		params.max_new_tokens = max_new_tokens
+		self.model.generation_config = params.to_generation_config()
+
+		return model_input
+
+	@abstractmethod
+	def generate(
+		self,
+		data: ModelInput | str,
+		params: GenerationParams | None = None,
+		*args: Any,
+		**kwargs: Any
+	) -> str | None:
+		pass
+
+	@abstractmethod
+	def generate_stream(
+		self,
+		data: ModelInput | str,
+		params: GenerationParams | None = None,
+		*args: Any,
+		**kwargs: Any
+	) -> Iterator[str]:
+		pass
 
 	def unload_model(self) -> None:
 		try:

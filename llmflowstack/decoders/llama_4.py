@@ -4,29 +4,30 @@ from time import time
 from typing import Iterator, Literal, cast
 
 import torch
-from transformers import (AutoTokenizer, BitsAndBytesConfig,
-                          StoppingCriteriaList, TextIteratorStreamer)
-from transformers.models.gpt2 import GPT2LMHeadModel
+from transformers import (AutoTokenizer, StoppingCriteriaList,
+                          TextIteratorStreamer)
+from transformers.models.llama4 import Llama4ForCausalLM
 
 from llmflowstack.callbacks.stop_on_token import StopOnToken
 from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
 from llmflowstack.schemas.params import GenerationParams
+from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
 
 
-class Gpt2(BaseDecoder):
-	model: GPT2LMHeadModel | None = None
-	max_context_len = 1024
+class Llama4(BaseDecoder):
+	model: Llama4ForCausalLM | None = None
+	max_context_len = 32768
+	legacy_trainer = True
 
 	def __init__(
 		self,
 		checkpoint: str | None = None,
-		quantization: bool | None = None,
 		seed: int | None = None
 	) -> None:
 		return super().__init__(
 			checkpoint=checkpoint,
-			quantization=quantization,
+			quantization=None,
 			seed=seed
 		)
 
@@ -37,46 +38,62 @@ class Gpt2(BaseDecoder):
 		if not self.tokenizer:
 			self._log("Could not set stop tokens - generation may not work...", LogLevel.WARNING)
 			return None
-		self.stop_token_ids = tokens
+		particular_tokens = self.tokenizer.encode("<|eot|>")
+		self.stop_token_ids = tokens + particular_tokens
 
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: bool | None = False
+		quantization: None = None
 	) -> None:
-		quantization_config = None
-		if quantization == "4bit":
-			quantization_config = BitsAndBytesConfig(
-				load_in_4bit=True
-			)
-		if quantization == "8bit":
-			quantization_config = BitsAndBytesConfig(
-				load_in_8bit=True
-			)
-
-		self.model = GPT2LMHeadModel.from_pretrained(
+		self.model = Llama4ForCausalLM.from_pretrained(
 			checkpoint,
-			quantization_config=quantization_config,
 			dtype="auto",
-			device_map="auto"
+			device_map="auto",
+			attn_implementation="eager"
 		)
 	
+	def load_checkpoint(
+		self,
+		checkpoint: str,
+		quantization: None = None
+	) -> None:
+		return super().load_checkpoint(checkpoint, quantization)
+
 	def _build_prompt(
 		self,
-		*args,
-		**kwargs
+		input_text: str,
+		output_text: str | None = None,
+		system_message: str | None = None
 	) -> str:
-		...
+		if not self.tokenizer:
+			raise MissingEssentialProp("Could not find tokenizer.")
+
+		if system_message is not None:
+			system_message = f"<|header_start|>system<|header_end|>\n\n{system_message}<|eot|>"
+
+		answer = "<|header_start|>assistant<|header_end|>\n\n"
+		answer += f"{output_text}<|eot|>" if output_text else ""
+
+		return (
+			"<|begin_of_text|>"
+			f"{system_message}"
+			"<|header_start|>user<|header_end|>\n\n"
+			f"{input_text}<|eot|>"
+			f"{answer}"
+		)
 
 	def build_input(
 		self,
 		input_text: str,
-		output_text: str | None = None
+		output_text: str | None = None,
+		system_message: str | None = None
 	) -> ModelInput:
 		return self._tokenize(
 			input_text=input_text,
 			output_text=output_text,
-			follow_prompt_format=False
+			follow_prompt_format=True,
+			system_message=system_message
 		)
 
 	def generate(
@@ -91,7 +108,7 @@ class Gpt2(BaseDecoder):
 		model_input = self._prepare_generation(
 			data=data,
 			params=params,
-			follow_prompt_format=False
+			follow_prompt_format=True
 		)
 
 		if model_input is None:
@@ -102,8 +119,8 @@ class Gpt2(BaseDecoder):
 
 		self.model.eval()
 		self.model.gradient_checkpointing_disable()
-		start = time()
 
+		start = time()
 		with torch.no_grad():
 			outputs = self.model.generate(
 				input_ids=input_ids,
@@ -113,17 +130,19 @@ class Gpt2(BaseDecoder):
 				stopping_criteria=StoppingCriteriaList([StopOnToken(self.stop_token_ids)])
 			)
 
-		answer = self.tokenizer.decode(outputs[0][input_ids.shape[-1]:], skip_special_tokens=True)
-
-		if isinstance(answer, list):
-			answer = answer[0]
-
 		end = time()
 		total_time = end - start
 
 		self._log(f"Response generated in {total_time:.4f} seconds")
 
-		return answer.strip()
+		answer = outputs[0][input_ids.shape[1]:]
+
+		decoded = self.tokenizer.decode(answer, skip_special_tokens=True)
+
+		if isinstance(decoded, list):
+			decoded = decoded[0]
+
+		return decoded
 	
 	def generate_stream(
 		self,
@@ -139,7 +158,7 @@ class Gpt2(BaseDecoder):
 		model_input = self._prepare_generation(
 			data=data,
 			params=params,
-			follow_prompt_format=False
+			follow_prompt_format=True
 		)
 
 		if model_input is None:

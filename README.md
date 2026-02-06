@@ -17,13 +17,11 @@ The goal is to make experimentation with LLMs more accessible, without the need 
 This framework is designed to provide flexibility when working with different open-source and commercial LLMs. Currently, the following models are supported:
 
 - **GPT-OSS**
-
   - [`GPT-OSS 20B`](https://huggingface.co/openai/gpt-oss-20b)
   - [`GPT-OSS 120B`](https://huggingface.co/openai/gpt-oss-120b)
     > Fine-Tuning, DAPT and Inference Available
 
 - **LLaMA 3**
-
   - [`LLaMA 3.1 8B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)
   - [`LLaMA 3.1 70B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)
   - [`LLaMA 3.3 70B - Instruct`](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct)
@@ -31,18 +29,12 @@ This framework is designed to provide flexibility when working with different op
     > Fine-Tuning, DAPT and Inference Available
 
 - **LLaMA 4**
-
   - [`LLaMA 4 Scout - Instruct`](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct)
     > DAPT and Inference Available
 
 - **Gemma**
-
   - [`Gemma 3 27B - Instruct`](https://huggingface.co/google/gemma-3-27b-it)
     > DAPT and Inference Available
-
-- **MedGemma**
-  - [`MedGemma 27B Text - Instruct`](https://huggingface.co/google/medgemma-27b-text-it)
-    > Fine-Tuning, DAPT and Inference Available
 
 > Other architectures based on those **may** function correctly.
 
@@ -65,22 +57,22 @@ This section presents a bit of what you can do with the framework.
 You can load as many models as your hardware allows (H100 GPU recommended)...
 
 ```python
-from llmflowstack import GPT_OSS, LLaMA3
+from llmflowstack import GptOss, Llama3
 
-# Loading a LLaMA model
-first_model = LLaMA3()
+# Loading a Llama model
+first_model = Llama3()
 first_model.load_checkpoint(
   checkpoint="/llama-3.1-8b-Instruct",
 )
 
-# Loading a quantized LLaMA model
-second_model = LLaMA3(
+# Loading a quantized Llama model
+second_model = Llama3(
   checkpoint="/llama-3.3-70b-Instruct",
   quantization="4bit"
 )
 
 # Loading a GPT-OSS, quantized and with seed
-thrid_model = GPT_OSS(
+thrid_model = GptOss(
   checkpoint="/gpt-oss-20b",
   quantization=True,
   seed=1234
@@ -90,9 +82,9 @@ thrid_model = GPT_OSS(
 ### Inference Examples
 
 ```python
-> from llmflowstack import GPT_OSS, GenerationParams, GenerationSampleParams
+> from llmflowstack import GptOss, GenerationParams
 
-> gpt_oss_model = GPT_OSS(checkpoint="/gpt-oss-120b")
+> gpt_oss_model = GptOss(checkpoint="/gpt-oss-120b")
 
 > gpt_oss_model.generate("Tell me a joke!")
 'Why did the scarecrow become a successful motivational speaker? Because he was outstanding **in** his field! 🌾😄'
@@ -107,15 +99,14 @@ thrid_model = GPT_OSS(
 > gpt_oss_model.generate(
     input=custom_input,
     params=GenerationParams(
+      mode="sample", # greedy, sample or beam
       max_new_tokens=1024,
-      sample=GenerationSampleParams(
-        temperature=0.3
-      )
+      temperature=0.3
     )
   )
 'Why did the scarecrow win an award? Because he was outstanding in his field!  \n\nHONK HONK'
 
-> llama_model = LLaMA3(checkpoint="/llama-3.3-70B-Instruct", quantization="4bit")
+> llama_model = Llama3(checkpoint="/llama-3.3-70B-Instruct", quantization="4bit")
 > llama_model.generate("Why is the sky blue?")
 'The sky appears blue because of a phenomenon called Rayleigh scattering, which is the scattering of light'
 
@@ -126,7 +117,7 @@ thrid_model = GPT_OSS(
 You can also generate tokens using a streamer, that is, receiving one token at a time by using the iterator version of the generate function:
 
 ```python
-llama_4 = LLaMA4(
+llama_4 = Llama4(
   checkpoint="llama-4-scout-17b-16e-instruct"
 )
 
@@ -139,10 +130,10 @@ for text in it:
 ### Training Examples (DAPT & Fine-tune)
 
 ```python
-from llmflowstack import LLaMA3
+from llmflowstack import Llama3
 from llmflowstack.schemas import TrainParams
 
-model = LLaMA3(
+model = Llama3(
   checkpoint="llama-3.1-8b-Instruct"
 )
 
@@ -150,27 +141,28 @@ model = LLaMA3(
 dataset = []
 dataset.append(model.build_input(
   input_text="Chico is a cat, which color he is?",
-  expected_answer="Black!"
+  output_text="Black!"
 ))
 
 dataset.append(model.build_input(
   input_text="Fred is a dog, which color he is?",
-  expected_answer="White!"
+  output_text="White!"
 ))
 
 # Does the DAPT in the full model
-model.dapt(
+model.train(
   train_dataset=dataset,
   params=TrainParams(
     batch_size=1,
     epochs=3,
     gradient_accumulation=1,
     lr=2e-5
-  )
+  ),
+  mode="DAPT"
 )
 
 # Does the fine-tune this time
-model.fine_tune(
+model.train(
   train_dataset=dataset,
   params=TrainParams(
     batch_size=1,
@@ -180,96 +172,12 @@ model.fine_tune(
   ),
   save_at_end=True,
   # It will save the model
-  save_path="./output"
+  save_path="./output",
+  mode="FT"
 )
 
 # Saving the final result
 model.save_checkpoint(
   path="./model-output"
 )
-```
-
-### RAG Pipeline
-
-A prototype of a RAG pipeline is also available. You can instantiate and use it as follows:
-
-```python
-from llmflowstack import VectorDatabase
-
-vector_db = VectorDatabase(
-	checkpoint="jina-embeddings-v4",
-	chunk_size=1000,
-	chunk_overlap=200
-)
-
-# Create or load an existing collection
-vector_db.get_collection(
-	collection_name="memory_rag",
-	persist_directory="./memory"
-)
-
-vector_db.get_collection(
-	collection_name="files_rag",
-	persist_directory="./files"
-)
-
-# You may also omit the persist directory; in this case, the RAG data will be stored in memory
-vector_db.get_collection(
-	collection_name="files_rag"
-)
-
-# To create a new document in a collection
-vector_db.create(
-	collection_name="memory_rag",
-	information="User loves Pizza!",    # Main information to be indexed in the vector database
-	other_info={"category": "food"},
-	can_split=False,                    # Indicates whether the information can be split into chunks
-	should_index=True                   # Defaults to True — defines whether the document should be indexed or only returned as a Document instance
-)
-
-# After adding documents, you can query the database
-query_result = vector_db.query(
-	collection_name="memory_rag",
-	query="pizza",
-	filter={"category": "food"},
-	k=3   # Number of chunks to retrieve
-)
-
-print(query_result)
-# > "User loves Pizza!"
-```
-
-### NLP Evaluation
-
-> **Disclaimer**
-> These evaluation functions are designed for batch processing. Models and encoders are loaded internally on each call, which may be inefficient for per-sample or streaming evaluation.
-
-```python
-> from llmflowstack import text_evaluation
-> from llmflowstack.utils import (bert_score_evaluation, bleu_score_evaluation, cosine_similarity_evaluation, rouge_evaluation)
-
-# Predictions from some model
-> predictions = ["Chico is a dog, and he is orange!", "Fred is a cat, and he is white!"]
-# References text (ground truth)
-> references = ["Chico is a cat, and he is black!", "Fred is a dog, and he is white!"]
-
-# BERT Score Evaluation
-> bert_score_evaluation(predictions, references)
-{'bertscore_precision': 0.9773, 'bertscore_recall': 0.9773, 'bertscore_f1': 0.9773}
-
-# Bleu Score Evaluation
-> bleu_score_evaluation(predictions, references)
-{'bleu_score': 0.3656}
-
-# Cosine Similarity Evaluation
-> cosine_similarity_evaluation(predictions, references)
-{'cosine_similarity': 0.7443}
-
-# Rouge Score Evaluation
-> rouge_evaluation(predictions, references)
-{'rouge1': 0.8125, 'rouge2': 0.6429, 'rougeL': 0.8125}
-
-# All-in-one function
-> text_evaluation(predictions, references)
-{'bertscore_precision': 0.9773, 'bertscore_recall': 0.9773, 'bertscore_f1': 0.9773, 'bleu_score': 0.3656, 'cosine_similarity': 0.7443, 'rouge1': 0.8125, 'rouge2': 0.6429, 'rougeL': 0.8125}
 ```

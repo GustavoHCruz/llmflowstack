@@ -26,7 +26,6 @@ dependencies = [
   "langchain_community",
   "nltk",
   "numpy",
-  "openai-harmony",
   "pandas",
   "peft",
   "rouge-score",

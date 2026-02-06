@@ -1,29 +1,32 @@
-from .decoders.gpt_2 import GPT_2
-from .decoders_it.gemma_3 import Gemma_3
-from .decoders_it.gpt_oss import GPT_OSS
-from .decoders_it.llama_3 import Llama_3_it
-from .decoders_it.llama_4 import Llama_4_it
-from .decoders_it.medgemma import MedGemma
-from .rag import VectorDatabase
-from .schemas.params import (GenerationBeamsParams, GenerationParams,
-                             GenerationSampleParams, TrainParams)
+from .decoders.gemma_3 import Gemma3
+from .decoders.gpt_2 import Gpt2
+from .decoders.gpt_oss import GptOss
+from .decoders.llama_3 import Llama3
+from .decoders.llama_4 import Llama4
+from .rag.VectorDatabase import VectorDatabase
+from .schemas.params import GenerationParams, TrainParams
 from .utils.evaluation_methods import text_evaluation
 
+LLaMA3 = Llama3
+LLaMA4 = Llama4
+GPT_OSS = GptOss
+
 __all__ = [
-  "GPT_2",
+  "Gpt2",
 
-  "Gemma_3",
+  "Gemma3",
+  "GptOss",
+  "Llama3",
+  "Llama4",
+
+  "LLaMA3",
+  "LLaMA4",
   "GPT_OSS",
-  "Llama_3_it",
-  "Llama_4_it",
-  "MedGemma",
 
-  "GenerationBeamsParams",
+  "VectorDatabase",
+
   "GenerationParams",
-  "GenerationSampleParams",
   "TrainParams",
 
-  "text_evaluation",
-  
-  "VectorDatabase"
+  "text_evaluation"
 ]

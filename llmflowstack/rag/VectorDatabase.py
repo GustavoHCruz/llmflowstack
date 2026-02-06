@@ -9,9 +9,10 @@ from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from sentence_transformers import SentenceTransformer
+
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
-from sentence_transformers import SentenceTransformer
 
 
 class EncoderWrapper(Embeddings):
@@ -105,7 +106,7 @@ class VectorDatabase:
 			self._log("Couldn't reset encoder...", LogLevel.ERROR)
 			self._log(f"{str(e)}", LogLevel.DEBUG)
 	
-	def get_collection(
+	def create_collection(
 		self,
 		collection_name: str = "rag_memory",
 		persist_directory: str | None = None
@@ -124,7 +125,7 @@ class VectorDatabase:
 			client_settings=client_settings
 		)
 	
-	def validate_collection_name(
+	def _validate_collection_name(
 		self,
 		collection_name: str
 	) -> None:
@@ -138,7 +139,7 @@ class VectorDatabase:
 		ids: list[str],
 		can_split: bool = True,
 	) -> None:
-		self.validate_collection_name(
+		self._validate_collection_name(
 			collection_name=collection_name
 		)
 
@@ -169,7 +170,7 @@ class VectorDatabase:
 			metadatas=metadatas
 		)
 	
-	def create(
+	def insert_document(
 		self,
 		collection_name: str,
 		information: str,
@@ -200,14 +201,14 @@ class VectorDatabase:
 
 		return doc
 	
-	def update(
+	def update_document(
 		self,
 		collection_name: str,
 		doc_id: str,
 		new_information: str,
 		other_info: dict[str, str] | None = None
 	) -> Document:
-		self.validate_collection_name(
+		self._validate_collection_name(
 			collection_name=collection_name
 		)
 
@@ -225,23 +226,39 @@ class VectorDatabase:
 		if ids_to_delete:
 			self.collections[collection_name].delete(ids=ids_to_delete)
 
-		return self.create(
+		return self.insert_document(
 			collection_name=collection_name,
 			information=new_information,
 			other_info=other_info,
 			doc_id=doc_id
 		)
 	
-	def delete(
+	def delete_document(
 		self,
 		collection_name: str,
-		doc_id: str
+		doc_id: str | None = None,
+		where: dict | None = None
 	) -> None:
-		self.validate_collection_name(
+		self._validate_collection_name(
 			collection_name=collection_name
 		)
 
-		self.collections[collection_name].delete(ids=[doc_id])
+		if doc_id:
+			self.collections[collection_name].delete(
+				ids=[doc_id],
+				where=where
+			)
+		else:
+			self.collections[collection_name].delete(
+				where=where
+			)
+	
+	def delete_collection(
+		self,
+		collection_name: str
+	) -> None:
+		self.collections[collection_name].delete_collection()
+		del self.collections[collection_name]
 
 	def rquery(
 		self,
@@ -250,7 +267,7 @@ class VectorDatabase:
 		k: int = 4,
 		filter: dict | None = None
 	) -> list[Document]:
-		self.validate_collection_name(
+		self._validate_collection_name(
 			collection_name=collection_name
 		)
 		
@@ -267,7 +284,7 @@ class VectorDatabase:
 		k: int = 4,
 		filter: dict | None = None
 	) -> str:
-		self.validate_collection_name(
+		self._validate_collection_name(
 			collection_name=collection_name
 		)
 
