@@ -1,10 +1,5 @@
-import threading
-from functools import partial
-from time import time
-from typing import Iterator, Literal, cast
+from typing import Iterator, Literal
 
-import torch
-from transformers import AutoTokenizer, TextIteratorStreamer
 from transformers.models.gpt_oss import GptOssForCausalLM
 from transformers.utils.quantization_config import Mxfp4Config
 
@@ -134,46 +129,26 @@ class GptOss(BaseDecoder):
 	def generate(
 		self,
 		data: ModelInput | str,
-		params: GenerationParams | None = None
+		params: GenerationParams | None = None,
+		force_json: bool = False
 	) -> str | None:
 		if self.model is None or self.tokenizer is None:
 			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			return None
 
-		model_input = self._prepare_generation(
+		generation_outputs = self._generate(
 			data=data,
 			params=params,
+			force_json=force_json,
 			follow_prompt_format=True
 		)
 
-		if model_input is None:
+		if generation_outputs is None:
 			return None
 		
-		input_ids = model_input.input_ids.unsqueeze(0).to(self.model.device)
-		attention_mask = model_input.attention_mask.unsqueeze(0).to(self.model.device)
-
-		self.model.eval()
-		self.model.gradient_checkpointing_disable()
-
-		start = time()
-		with torch.no_grad():
-			outputs = self.model.generate(
-				input_ids=input_ids,
-				attention_mask=attention_mask,
-				use_cache=True,
-				eos_token_id=self.stop_token_ids,
-				pad_token_id=self.tokenizer.pad_token_id
-			)
+		_, outputs = generation_outputs
 
 		answer = self.tokenizer.decode(outputs[0])
-
-		if isinstance(answer, list):
-			answer = answer[0]
-
-		end = time()
-		total_time = end - start
-
-		self._log(f"Response generated in {total_time:.4f} seconds")
 
 		start = answer.rfind("<|message|>")
 		if start == -1:
@@ -190,46 +165,15 @@ class GptOss(BaseDecoder):
 	def generate_stream(
 		self,
 		data: ModelInput | str,
-		params: GenerationParams | None = None
+		params: GenerationParams | None = None,
+		force_json: bool = False
 	) -> Iterator[str]:
-		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", LogLevel.WARNING)
-			if False:
-				yield ""
-			return
-		
-		model_input = self._prepare_generation(
+		streamer = self._generate_stream(
 			data=data,
 			params=params,
+			force_json=force_json,
 			follow_prompt_format=True
 		)
-
-		if model_input is None:
-			return None
-		
-		input_ids = model_input.input_ids.unsqueeze(0).to(self.model.device)
-		attention_mask = model_input.attention_mask.unsqueeze(0).to(self.model.device)
-
-		streamer = TextIteratorStreamer(
-			cast(AutoTokenizer, self.tokenizer),
-			skip_prompt=True,
-			skip_special_tokens=True
-		)
-
-		generate_fn = partial(
-			self.model.generate,
-			input_ids=input_ids,
-			attention_mask=attention_mask,
-			use_cache=True,
-			eos_token_id=self.stop_token_ids,
-			pad_token_id=self.tokenizer.pad_token_id,
-			streamer=streamer
-		)
-
-		start = time()
-
-		thread = threading.Thread(target=generate_fn)
-		thread.start()
 
 		done_thinking = self.reasoning_level == "Off"
 		buffer = ""
@@ -244,8 +188,3 @@ class GptOss(BaseDecoder):
 			if done_thinking:
 				yield buffer
 				buffer = ""
-		
-		end = time()
-		total_time = end - start
-
-		self._log(f"Response generated in {total_time:.4f} seconds")

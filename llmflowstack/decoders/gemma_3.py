@@ -1,10 +1,5 @@
-import threading
-from functools import partial
-from time import time
-from typing import Iterator, Literal, cast
+from typing import Iterator, Literal
 
-import torch
-from transformers import AutoTokenizer, TextIteratorStreamer
 from transformers.models.gemma3 import Gemma3ForCausalLM
 from transformers.utils.quantization_config import BitsAndBytesConfig
 
@@ -111,99 +106,40 @@ class Gemma3(BaseDecoder):
 	def generate(
 		self,
 		data: ModelInput | str,
-		params: GenerationParams | None = None
+		params: GenerationParams | None = None,
+		force_json: bool = False
 	) -> str | None:
-		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", LogLevel.WARNING)
+		if self.tokenizer is None:
+			self._log("Tokenizer missing", LogLevel.WARNING)
 			return None
-
-		model_input = self._prepare_generation(
+		
+		generation_outputs = self._generate(
 			data=data,
 			params=params,
+			force_json=force_json,
 			follow_prompt_format=True
 		)
 
-		if model_input is None:
+		if generation_outputs is None:
 			return None
 		
-		input_ids = model_input.input_ids.unsqueeze(0).to(self.model.device)
-		attention_mask = model_input.attention_mask.unsqueeze(0).to(self.model.device)
+		start_index, outputs = generation_outputs
 
-		self.model.eval()
-		self.model.gradient_checkpointing_disable()
+		answer = outputs[0][start_index:]
 
-		start = time()
-		with torch.no_grad():
-			outputs = self.model.generate(
-				input_ids=input_ids,
-				attention_mask=attention_mask,
-				use_cache=True,
-				eos_token_id=self.stop_token_ids,
-				pad_token_id=self.tokenizer.pad_token_id
-			)
+		decoded = self.tokenizer.decode(answer, skip_special_tokens=True)
 
-		end = time()
-		total_time = end - start
-
-		self._log(f"Response generated in {total_time:.4f} seconds")
-
-		response = outputs[0][input_ids.shape[1]:]
-
-		decoded = self.tokenizer.decode(response, skip_special_tokens=True)
-
-		if isinstance(decoded, list):
-			decoded = decoded[0]
-
-		return decoded
+		return decoded.strip()
 	
 	def generate_stream(
 		self,
 		data: ModelInput | str,
-		params: GenerationParams | None = None
+		params: GenerationParams | None = None,
+		force_json: bool = False
 	) -> Iterator[str]:
-		if self.model is None or self.tokenizer is None:
-			self._log("Model or Tokenizer missing", LogLevel.WARNING)
-			if False:
-				yield ""
-			return
-		
-		model_input = self._prepare_generation(
+		return self._generate_stream(
 			data=data,
 			params=params,
+			force_json=force_json,
 			follow_prompt_format=True
 		)
-
-		if model_input is None:
-			return None
-		
-		input_ids = model_input.input_ids.unsqueeze(0).to(self.model.device)
-		attention_mask = model_input.attention_mask.unsqueeze(0).to(self.model.device)
-
-		streamer = TextIteratorStreamer(
-			cast(AutoTokenizer, self.tokenizer),
-			skip_prompt=True,
-			skip_special_tokens=True
-		)
-
-		generate_fn = partial(
-			self.model.generate,
-			input_ids=input_ids,
-			attention_mask=attention_mask,
-			use_cache=True,
-			eos_token_id=self.stop_token_ids,
-			pad_token_id=self.tokenizer.pad_token_id,
-			streamer=streamer
-		)
-
-		start = time()
-
-		thread = threading.Thread(target=generate_fn)
-		thread.start()
-
-		for new_text in streamer:
-			yield new_text
-		
-		end = time()
-		total_time = end - start
-
-		self._log(f"Response generated in {total_time:.4f} seconds")

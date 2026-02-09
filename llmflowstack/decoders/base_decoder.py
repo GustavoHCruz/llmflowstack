@@ -1,20 +1,27 @@
 import gc
 import os
 import random
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from functools import partial
 from logging import getLogger
-from typing import Any, Iterator, Literal
+from time import time
+from typing import Any, Iterator, Literal, cast
 
 import numpy as np
 import torch
 from datasets import Dataset
 from torch import Tensor, tensor
-from transformers import AutoTokenizer, PreTrainedTokenizerBase, Trainer
+from transformers import (AutoTokenizer, LogitsProcessorList,
+                          PreTrainedTokenizerBase, StoppingCriteriaList,
+                          TextIteratorStreamer, Trainer)
 from transformers.tokenization_utils_base import BatchEncoding
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
 
+from llmflowstack.callbacks.force_json import (ForceJsonLogitsProcessor,
+                                               StopOnJsonComplete)
 from llmflowstack.callbacks.log_collector import LogCollectorCallback
 from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
@@ -402,11 +409,133 @@ class BaseDecoder(ABC):
 
 		return model_input
 
+	def _generate(
+		self,
+		data: ModelInput | str,
+		params: GenerationParams | None,
+		force_json: bool,
+		follow_prompt_format: bool
+	) -> None | tuple[int, Tensor]:
+		if self.model is None or self.tokenizer is None:
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
+			return None
+
+		model_input = self._prepare_generation(
+			data=data,
+			params=params,
+			follow_prompt_format=follow_prompt_format
+		)
+
+		if model_input is None:
+			return None
+		
+		input_ids = model_input.input_ids.unsqueeze(0).to(self.model.device)
+		attention_mask = model_input.attention_mask.unsqueeze(0).to(self.model.device)
+
+		self.model.eval()
+		self.model.gradient_checkpointing_disable()
+
+		stopping = []
+
+		logits_processor = None
+		if force_json:
+			forcer = ForceJsonLogitsProcessor(
+				tokenizer=self.tokenizer,
+				top_k=256
+			)
+			logits_processor = LogitsProcessorList([forcer])
+			stopping.append(StopOnJsonComplete(forcer))
+
+		start = time()
+		with torch.no_grad():
+			outputs = self.model.generate(
+				input_ids=input_ids,
+				attention_mask=attention_mask,
+				use_cache=True,
+				eos_token_id=self.stop_token_ids,
+				pad_token_id=self.tokenizer.pad_token_id,
+				logits_processor=logits_processor,
+				stopping_criteria=StoppingCriteriaList(stopping)
+			)
+		
+		end = time()
+		total_time = end - start
+
+		self._log(f"Response generated in {total_time:.4f} seconds")
+
+		return input_ids.shape[1], outputs
+	
+	def _generate_stream(
+		self,
+		data: ModelInput | str,
+		params: GenerationParams | None = None,
+		force_json: bool = False,
+		follow_prompt_format: bool = True
+	) -> Iterator[str]:
+		if self.model is None or self.tokenizer is None:
+			self._log("Model or Tokenizer missing", LogLevel.WARNING)
+			return None
+		
+		model_input = self._prepare_generation(
+			data=data,
+			params=params,
+			follow_prompt_format=follow_prompt_format
+		)
+
+		if model_input is None:
+			return None
+		
+		input_ids = model_input.input_ids.unsqueeze(0).to(self.model.device)
+		attention_mask = model_input.attention_mask.unsqueeze(0).to(self.model.device)
+
+		streamer = TextIteratorStreamer(
+			cast(AutoTokenizer, self.tokenizer),
+			skip_prompt=True,
+			skip_special_tokens=True
+		)
+
+		stopping = []
+
+		logits_processor = None
+		if force_json:
+			forcer = ForceJsonLogitsProcessor(
+				tokenizer=self.tokenizer,
+				top_k=256
+			)
+			logits_processor = LogitsProcessorList([forcer])
+			stopping.append(StopOnJsonComplete(forcer))
+
+		generate_fn = partial(
+			self.model.generate,
+			input_ids=input_ids,
+			attention_mask=attention_mask,
+			use_cache=True,
+			eos_token_id=self.stop_token_ids,
+			pad_token_id=self.tokenizer.pad_token_id,
+			logits_processor=logits_processor,
+			stopping_criteria=StoppingCriteriaList(stopping),
+			streamer=streamer
+		)
+	
+		start = time()
+
+		thread = threading.Thread(target=generate_fn)
+		thread.start()
+
+		for new_text in streamer:
+			yield new_text
+
+		end = time()
+		total_time = end - start
+
+		self._log(f"Response generated in {total_time:.4f} seconds")
+
 	@abstractmethod
 	def generate(
 		self,
 		data: ModelInput | str,
 		params: GenerationParams | None = None,
+		force_json: bool = False,
 		*args: Any,
 		**kwargs: Any
 	) -> str | None:
@@ -417,6 +546,7 @@ class BaseDecoder(ABC):
 		self,
 		data: ModelInput | str,
 		params: GenerationParams | None = None,
+		force_json: bool = False,
 		*args: Any,
 		**kwargs: Any
 	) -> Iterator[str]:
