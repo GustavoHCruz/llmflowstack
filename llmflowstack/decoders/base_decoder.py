@@ -242,7 +242,6 @@ class BaseDecoder(ABC):
 			promptfied_input = self._build_prompt(
 				input_text=input_text,
 				output_text=output_text,
-				image_paths=image_paths,
 				*args,
 				**kwargs
 			)
