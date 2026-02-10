@@ -16,7 +16,6 @@ license = {text = "MIT"}
 dependencies = [
   "accelerate",
   "bert-score",
-  "bitsandbytes",
   "chromadb",
   "datasets",
   "evaluate",
@@ -29,7 +28,6 @@ dependencies = [
   "pillow",
   "rouge-score",
   "safetensors",
-  "scikit-learn",
   "sentence-transformers",
   "torch",
   "torchao",

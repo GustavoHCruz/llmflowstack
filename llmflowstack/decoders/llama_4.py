@@ -49,9 +49,10 @@ class Llama4(BaseDecoder):
 
 		self.model = Llama4ForCausalLM.from_pretrained(
 			checkpoint,
+			quantization_config=quantization_config,
+			attn_implementation="sdpa",
 			dtype="auto",
-			device_map="auto",
-			quantization_config=quantization_config
+			device_map="auto"
 		)
 	
 	def load_checkpoint(

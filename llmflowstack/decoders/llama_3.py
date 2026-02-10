@@ -1,4 +1,4 @@
-from typing import Iterator, Literal
+from typing import Iterator
 
 from torchao.quantization import Int4WeightOnlyConfig
 from transformers import TorchAoConfig

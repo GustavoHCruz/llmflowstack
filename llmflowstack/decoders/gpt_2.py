@@ -1,6 +1,7 @@
 from typing import Iterator
 
-from transformers import BitsAndBytesConfig
+from torchao.quantization import Int4WeightOnlyConfig
+from transformers import TorchAoConfig
 from transformers.models.gpt2 import GPT2LMHeadModel
 
 from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
@@ -39,18 +40,14 @@ class Gpt2(BaseDecoder):
 		quantization: bool | None = False
 	) -> None:
 		quantization_config = None
-		if quantization == "4bit":
-			quantization_config = BitsAndBytesConfig(
-				load_in_4bit=True
-			)
-		if quantization == "8bit":
-			quantization_config = BitsAndBytesConfig(
-				load_in_8bit=True
-			)
+		if quantization:
+			quant_config = Int4WeightOnlyConfig(group_size=128)
+			quantization_config = TorchAoConfig(quant_type=quant_config)
 
 		self.model = GPT2LMHeadModel.from_pretrained(
 			checkpoint,
 			quantization_config=quantization_config,
+			attn_implementation="sdpa",
 			dtype="auto",
 			device_map="auto"
 		)

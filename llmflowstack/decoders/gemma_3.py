@@ -1,7 +1,8 @@
 from typing import Iterator, Literal
 
-from transformers.models.gemma3 import Gemma3ForCausalLM
-from transformers.utils.quantization_config import BitsAndBytesConfig
+from torchao.quantization import Int4WeightOnlyConfig
+from transformers import TorchAoConfig
+from transformers.models.gemma3 import Gemma3ForConditionalGeneration
 
 from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
 from llmflowstack.schemas.params import GenerationParams
@@ -10,7 +11,7 @@ from llmflowstack.utils.logging import LogLevel
 
 
 class Gemma3(BaseDecoder):
-	model: Gemma3ForCausalLM | None = None
+	model: Gemma3ForConditionalGeneration | None = None
 	max_context_len = 32768
 	can_handle_image_processing = True
 
@@ -39,17 +40,17 @@ class Gemma3(BaseDecoder):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: Literal["4bit"] | None = None
+		quantization: bool | None = None
 	) -> None:
 		quantization_config = None
 		if quantization:
-			quantization_config = BitsAndBytesConfig(
-				load_in_4bit=True
-			)
+			quant_config = Int4WeightOnlyConfig(group_size=128)
+			quantization_config = TorchAoConfig(quant_type=quant_config)
 
-		self.model = Gemma3ForCausalLM.from_pretrained(
+		self.model = Gemma3ForConditionalGeneration.from_pretrained(
 			checkpoint,
 			quantization_config=quantization_config,
+			attn_implementation="sdpa",
 			dtype="auto",
 			device_map="auto"
 		)
@@ -63,7 +64,7 @@ class Gemma3(BaseDecoder):
 
 	def _build_prompt(
 		self,
-		input_text: str,
+		input_text: list[str] | str,
 		output_text: str | None = None,
 		system_message: str | None = None,
 		image_paths: list[str] | None = None
@@ -78,19 +79,29 @@ class Gemma3(BaseDecoder):
 		if system_message:
 			system_message = f"{system_message}\n"
 
+		input_final_text = ""
+		if image_paths is not None and isinstance(input_text, list) and len(image_paths) == len(input_text):
+			for text in input_text:
+				input_final_text += f"<start_of_image>{text}"
+		elif image_paths is not None and isinstance(input_text, str):
+			for _ in image_paths:
+				input_final_text += f"<start_of_image>{input_text}"
+		else:
+			input_final_text = str(input_text)
+
 		expected_answer = output_text
 		answer = f"{expected_answer}<end_of_turn>" if expected_answer else ""
 	
 		return (
-			f"<bos><start_of_turn>user"
-			f"{system_message}\n{input_text}<end_of_turn>\n"
+			f"<bos><start_of_turn>user\n"
+			f"{system_message}\n{input_final_text}<end_of_turn>\n"
 			f"<start_of_turn>model\n"
 			f"{answer}"
 		)
 
 	def build_input(
 		self,
-		input_text: str,
+		input_text: list[str] | str,
 		output_text: str | None = None,
 		image_paths: list[str] | None = None,
 		system_message: str | None = None

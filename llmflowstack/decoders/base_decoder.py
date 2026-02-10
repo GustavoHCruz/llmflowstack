@@ -14,9 +14,9 @@ import torch
 from datasets import Dataset
 from PIL import Image
 from torch import Tensor, tensor
-from transformers import (AutoProcessor, AutoTokenizer, LogitsProcessorList,
-                          PreTrainedTokenizerBase, StoppingCriteriaList,
-                          TextIteratorStreamer, Trainer)
+from transformers import (AutoProcessor, AutoTokenizer, BatchFeature,
+                          LogitsProcessorList, PreTrainedTokenizerBase,
+                          StoppingCriteriaList, TextIteratorStreamer, Trainer)
 from transformers.tokenization_utils_base import BatchEncoding
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
@@ -110,7 +110,10 @@ class BaseDecoder(ABC):
 		self,
 		checkpoint: str
 	) -> None:
-		processor = AutoProcessor.from_pretrained(checkpoint)
+		processor = AutoProcessor.from_pretrained(
+			checkpoint,
+			use_fast=True
+		)
 		
 		self.processor = processor
 	
@@ -216,7 +219,7 @@ class BaseDecoder(ABC):
 	@abstractmethod
 	def _build_prompt(
 		self,
-		input_text: str,
+		input_text: list[str] | str,
 		output_text: str | None = None,
 		*args: Any,
 		**kwargs: Any
@@ -225,7 +228,7 @@ class BaseDecoder(ABC):
 		
 	def _tokenize(
 		self,
-		input_text: str,
+		input_text: list[str] | str,
 		output_text: str | None = None,
 		follow_prompt_format: bool = True,
 		image_paths: list[str] | None = None,
@@ -239,10 +242,12 @@ class BaseDecoder(ABC):
 			promptfied_input = self._build_prompt(
 				input_text=input_text,
 				output_text=output_text,
+				image_paths=image_paths,
 				*args,
 				**kwargs
 			)
 		else:
+			assert isinstance(input_text, str)
 			promptfied_input = self._build_generic_input(
 				input_text=input_text,
 				output_text=output_text
@@ -255,25 +260,30 @@ class BaseDecoder(ABC):
 					Image.open(path).convert("RGB")
 				)
 			
-			tokenized_input = self.processor(
+			processor_output: BatchFeature = self.processor(
 				text=promptfied_input,
-				images=images
+				images=images,
+				add_special_tokens=False
 			)
-		else:		
-			tokenized_input: BatchEncoding = self.tokenizer(
+			input_ids = processor_output["input_ids"][0]
+			attention_mask = processor_output["attention_mask"][0]
+			token_type_ids = processor_output["token_type_ids"][0]
+			pixel_values = torch.stack(processor_output["pixel_values"], dim=0)
+		else:
+			tokenizer_output: BatchEncoding = self.tokenizer(
 				text=promptfied_input,
 				add_special_tokens=False
 			)
+			input_ids = tokenizer_output["input_ids"]
+			attention_mask = tokenizer_output["attention_mask"]
+			token_type_ids = None
+			pixel_values = None
 
-		input_ids = tensor(tokenized_input["input_ids"], dtype=torch.long)
-		attention_mask = tensor(tokenized_input["attention_mask"], dtype=torch.bool)
-		token_type_ids = None
-		if tokenized_input.get("token_type_ids"):
-			token_type_ids = tensor(tokenized_input["token_type_ids"], dtype=torch.long)
-		pixel_values = None
-		if tokenized_input.get("pixel_values"):
-			pixel_values = tensor(tokenized_input["pixel_values"], dtype=torch.float)
-	
+		input_ids = tensor(input_ids, dtype=torch.long)
+		attention_mask = tensor(attention_mask, dtype=torch.bool)
+		if token_type_ids:
+			token_type_ids = tensor(token_type_ids, dtype=torch.long)
+
 		if follow_prompt_format:
 			promptfied_partial_input = self._build_prompt(
 				input_text=input_text,
@@ -282,15 +292,28 @@ class BaseDecoder(ABC):
 				**kwargs
 			)
 		else:
+			assert isinstance(input_text, str)
 			promptfied_partial_input = self._build_generic_input(
 				input_text=input_text,
 				output_text=None
 			)
 
-		tokenized_partial_input: BatchEncoding = self.tokenizer(
-			text=promptfied_partial_input,
-			add_special_tokens=False
-		)
+		if image_paths and self.processor is not None:
+			images = []
+			for path in image_paths:
+				images.append(
+					Image.open(path).convert("RGB")
+				)
+			tokenized_partial_input = self.processor(
+				text=promptfied_partial_input,
+				images=images,
+				add_special_tokens=False
+			)
+		else:
+			tokenized_partial_input = self.tokenizer(
+				text=promptfied_partial_input,
+				add_special_tokens=False
+			)
 
 		partial_input_ids = tensor(tokenized_partial_input["input_ids"], dtype=torch.long)
 
@@ -412,7 +435,7 @@ class BaseDecoder(ABC):
 		data: ModelInput | str,
 		params: GenerationParams | None = None,
 		follow_prompt_format: bool = True
-	) -> ModelInput | None:
+	) -> dict[str, Tensor] | None:
 		if self.model is None or self.tokenizer is None:
 			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			return None
@@ -449,7 +472,15 @@ class BaseDecoder(ABC):
 		params.max_new_tokens = max_new_tokens
 		self.model.generation_config = params.to_generation_config()
 
-		return model_input
+		input_dict = {}
+		input_dict["input_ids"] = model_input.input_ids.unsqueeze(0).to(self.model.device)
+		input_dict["attention_mask"] = model_input.attention_mask.unsqueeze(0).to(self.model.device)
+		if model_input.token_type_ids is not None:
+			input_dict["token_type_ids"] = model_input.token_type_ids.unsqueeze(0).to(self.model.device)
+		if model_input.pixel_values is not None:
+			input_dict["pixel_values"] = model_input.pixel_values.to(self.model.device)
+
+		return input_dict
 
 	def _generate(
 		self,
@@ -462,23 +493,15 @@ class BaseDecoder(ABC):
 			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			return None
 
-		model_input = self._prepare_generation(
+		input_dict = self._prepare_generation(
 			data=data,
 			params=params,
 			follow_prompt_format=follow_prompt_format
 		)
 
-		if model_input is None:
+		if input_dict is None:
 			return None
 		
-		input_dict = {}
-		input_dict["input_ids"] = model_input.input_ids.unsqueeze(0).to(self.model.device)
-		input_dict["attention_mask"] = model_input.attention_mask.unsqueeze(0).to(self.model.device)
-		if model_input.token_type_ids:
-			input_dict["token_type_ids"] = model_input.token_type_ids.unsqueeze(0).to(self.model.device)
-		if model_input.pixel_values:
-			input_dict["pixel_values"] = model_input.pixel_values.unsqueeze(0).to(self.model.device)
-
 		self.model.eval()
 		self.model.gradient_checkpointing_disable()
 
@@ -522,22 +545,14 @@ class BaseDecoder(ABC):
 			self._log("Model or Tokenizer missing", LogLevel.WARNING)
 			return None
 		
-		model_input = self._prepare_generation(
+		input_dict = self._prepare_generation(
 			data=data,
 			params=params,
 			follow_prompt_format=follow_prompt_format
 		)
 
-		if model_input is None:
+		if input_dict is None:
 			return None
-		
-		input_dict = {}
-		input_dict["input_ids"] = model_input.input_ids.unsqueeze(0).to(self.model.device)
-		input_dict["attention_mask"] = model_input.attention_mask.unsqueeze(0).to(self.model.device)
-		if model_input.token_type_ids:
-			input_dict["token_type_ids"] = model_input.token_type_ids.unsqueeze(0).to(self.model.device)
-		if model_input.pixel_values:
-			input_dict["pixel_values"] = model_input.pixel_values.unsqueeze(0).to(self.model.device)
 
 		streamer = TextIteratorStreamer(
 			cast(AutoTokenizer, self.tokenizer),
