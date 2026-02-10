@@ -148,19 +148,22 @@ class GptOss(BaseDecoder):
 		
 		_, outputs = generation_outputs
 
-		answer = self.tokenizer.decode(outputs[0])
+		decoded = self.tokenizer.decode(outputs[0])
 
-		start = answer.rfind("<|message|>")
+		if isinstance(decoded, list):
+			decoded = decoded[0]
+
+		start = decoded.rfind("<|message|>")
 		if start == -1:
 			return ""
 
 		start += len("<|message|>")
 
-		end = answer.find("<|return|>", start)
+		end = decoded.find("<|return|>", start)
 		if end == -1:
-			end = len(answer)
+			end = len(decoded)
 
-		return answer[start:end].strip()
+		return decoded[start:end].strip()
 	
 	def generate_stream(
 		self,

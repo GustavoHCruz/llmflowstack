@@ -17,24 +17,23 @@ The goal is to make experimentation with LLMs more accessible, without the need 
 This framework is designed to provide flexibility when working with different open-source and commercial LLMs. Currently, the following models are supported:
 
 - **GPT-OSS**
+
   - [`GPT-OSS 20B`](https://huggingface.co/openai/gpt-oss-20b)
   - [`GPT-OSS 120B`](https://huggingface.co/openai/gpt-oss-120b)
-    > Fine-Tuning, DAPT and Inference Available
 
 - **LLaMA 3**
+
   - [`LLaMA 3.1 8B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)
   - [`LLaMA 3.1 70B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)
   - [`LLaMA 3.3 70B - Instruct`](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct)
   - [`LLaMA 3.3 405B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct)
-    > Fine-Tuning, DAPT and Inference Available
 
 - **LLaMA 4**
+
   - [`LLaMA 4 Scout - Instruct`](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct)
-    > DAPT and Inference Available
 
 - **Gemma**
   - [`Gemma 3 27B - Instruct`](https://huggingface.co/google/gemma-3-27b-it)
-    > DAPT and Inference Available
 
 > Other architectures based on those **may** function correctly.
 
@@ -90,14 +89,14 @@ thrid_model = GptOss(
 'Why did the scarecrow become a successful motivational speaker? Because he was outstanding **in** his field! 🌾😄'
 
 # Exclusive for GPT-OSS
-> gpt_oss_model.set_reasoning_level("High")
+> gpt_oss_model.set_reasoning_level("High") # Low, Medium, High, Off
 
 > custom_input = gpt_oss_model.build_input(
     input_text="Tell me another joke!",
     developer_message="You are a clown and after every joke, you should say 'HONK HONK'"
   )
 > gpt_oss_model.generate(
-    input=custom_input,
+    data=custom_input,
     params=GenerationParams(
       mode="sample", # greedy, sample or beam
       max_new_tokens=1024,
@@ -151,7 +150,7 @@ dataset.append(model.build_input(
 
 # Does the DAPT in the full model
 model.train(
-  train_dataset=dataset,
+  train_data=dataset,
   params=TrainParams(
     batch_size=1,
     epochs=3,
@@ -163,7 +162,7 @@ model.train(
 
 # Does the fine-tune this time
 model.train(
-  train_dataset=dataset,
+  train_data=dataset,
   params=TrainParams(
     batch_size=1,
     gradient_accumulation=1,

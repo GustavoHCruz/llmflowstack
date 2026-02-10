@@ -1,7 +1,8 @@
 from typing import Iterator, Literal
 
+from torchao.quantization import Int4WeightOnlyConfig
+from transformers import TorchAoConfig
 from transformers.models.llama import LlamaForCausalLM
-from transformers.utils.quantization_config import BitsAndBytesConfig
 
 from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
 from llmflowstack.schemas.params import GenerationParams
@@ -11,14 +12,12 @@ from llmflowstack.utils.logging import LogLevel
 
 class Llama3(BaseDecoder):
 	model: LlamaForCausalLM | None = None
-	question_fields = ["input_text", "system_message"]
-	answer_fields = ["expected_answer"]
 	max_context_len = 8192
 
 	def __init__(
 		self,
 		checkpoint: str | None = None,
-		quantization: Literal["4bit", "8bit"] | None = None,
+		quantization: bool | None = None,
 		seed: int | None = None
 	) -> None:
 		return super().__init__(
@@ -40,21 +39,17 @@ class Llama3(BaseDecoder):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: Literal["4bit", "8bit"] | None = None
+		quantization: bool | None = None
 	) -> None:
 		quantization_config = None
-		if quantization == "4bit":
-			quantization_config = BitsAndBytesConfig(
-				load_in_4bit=True
-			)
-		if quantization == "8bit":
-			quantization_config = BitsAndBytesConfig(
-				load_in_8bit=True
-			)
+		if quantization:
+			quant_config = Int4WeightOnlyConfig(group_size=128)
+			quantization_config = TorchAoConfig(quant_type=quant_config)
 
 		self.model = LlamaForCausalLM.from_pretrained(
 			checkpoint,
 			quantization_config=quantization_config,
+			attn_implementation="sdpa",
 			dtype="auto",
 			device_map="auto"
 		)
@@ -62,7 +57,7 @@ class Llama3(BaseDecoder):
 	def load_checkpoint(
 		self,
 		checkpoint: str,
-		quantization: Literal['4bit', "8bit"] | None = None
+		quantization: bool | None = None
 	) -> None:
 		return super().load_checkpoint(checkpoint, quantization)
 
@@ -123,6 +118,9 @@ class Llama3(BaseDecoder):
 		answer = outputs[0][start_index:]
 
 		decoded = self.tokenizer.decode(answer, skip_special_tokens=True)
+
+		if isinstance(decoded, list):
+			decoded = decoded[0]
 
 		return decoded.strip()
 	

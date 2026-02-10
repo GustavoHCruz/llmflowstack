@@ -99,6 +99,9 @@ class Gpt2(BaseDecoder):
 
 		decoded = self.tokenizer.decode(answer, skip_special_tokens=True)
 
+		if isinstance(decoded, list):
+			decoded = decoded[0]
+
 		return decoded.strip()
 	
 	def generate_stream(

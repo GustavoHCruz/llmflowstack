@@ -12,8 +12,9 @@ from typing import Any, Iterator, Literal, cast
 import numpy as np
 import torch
 from datasets import Dataset
+from PIL import Image
 from torch import Tensor, tensor
-from transformers import (AutoTokenizer, LogitsProcessorList,
+from transformers import (AutoProcessor, AutoTokenizer, LogitsProcessorList,
                           PreTrainedTokenizerBase, StoppingCriteriaList,
                           TextIteratorStreamer, Trainer)
 from transformers.tokenization_utils_base import BatchEncoding
@@ -34,22 +35,25 @@ class ModelInput:
 	attention_mask: Tensor
 	ft_labels: Tensor
 	dapt_labels: Tensor
+	token_type_ids: Tensor | None
+	pixel_values: Tensor | None
 
 class BaseDecoder(ABC):
 	model = None
 	tokenizer = None
+	processor = None
 	model_is_quantized = None
 	seed = None
 	stop_token_ids = []
 	question_fields = []
 	answer_fields = []
 	max_context_len: int = 1024
-	legacy_trainer = False
+	can_handle_image_processing = False
 
 	def __init__(
 		self,
 		checkpoint: str | None = None,
-		quantization: Literal["4bit", "8bit"] | bool | None = None,
+		quantization: bool | None = None,
 		seed: int | None = None
 	) -> None:
 		if seed:
@@ -91,13 +95,24 @@ class BaseDecoder(ABC):
 	) -> None:
 		pass
 
-	def _load_tokenizer(self, checkpoint: str) -> None:
+	def _load_tokenizer(
+		self,
+		checkpoint: str
+	) -> None:
 		tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 		tokenizer.pad_token = tokenizer.eos_token
 		tokenizer.add_eos_token = True
 		tokenizer.padding_side = "right"
 
 		self.tokenizer = tokenizer
+	
+	def _load_processor(
+		self,
+		checkpoint: str
+	) -> None:
+		processor = AutoProcessor.from_pretrained(checkpoint)
+		
+		self.processor = processor
 	
 	def load_checkpoint(
 		self,
@@ -110,11 +125,17 @@ class BaseDecoder(ABC):
 
 		self._log(f"Loading model on '{checkpoint}'")
 
-		self._load_tokenizer(checkpoint)
+		self._load_tokenizer(
+			checkpoint=checkpoint
+		)
 		self._load_model(
 			checkpoint=checkpoint,
 			quantization=quantization
 		)
+		if self.can_handle_image_processing:
+			self._load_processor(
+				checkpoint=checkpoint
+			)
 
 		self._log("Model & Tokenizer loaded")
 		
@@ -207,6 +228,7 @@ class BaseDecoder(ABC):
 		input_text: str,
 		output_text: str | None = None,
 		follow_prompt_format: bool = True,
+		image_paths: list[str] | None = None,
 		*args: Any,
 		**kwargs: Any
 	) -> ModelInput:
@@ -225,14 +247,32 @@ class BaseDecoder(ABC):
 				input_text=input_text,
 				output_text=output_text
 			)
+		
+		if image_paths and self.processor is not None:
+			images = []
+			for path in image_paths:
+				images.append(
+					Image.open(path).convert("RGB")
+				)
 			
-		tokenized_input: BatchEncoding = self.tokenizer(
-			text=promptfied_input,
-			add_special_tokens=False
-		)
+			tokenized_input = self.processor(
+				text=promptfied_input,
+				images=images
+			)
+		else:		
+			tokenized_input: BatchEncoding = self.tokenizer(
+				text=promptfied_input,
+				add_special_tokens=False
+			)
 
 		input_ids = tensor(tokenized_input["input_ids"], dtype=torch.long)
 		attention_mask = tensor(tokenized_input["attention_mask"], dtype=torch.bool)
+		token_type_ids = None
+		if tokenized_input.get("token_type_ids"):
+			token_type_ids = tensor(tokenized_input["token_type_ids"], dtype=torch.long)
+		pixel_values = None
+		if tokenized_input.get("pixel_values"):
+			pixel_values = tensor(tokenized_input["pixel_values"], dtype=torch.float)
 	
 		if follow_prompt_format:
 			promptfied_partial_input = self._build_prompt(
@@ -266,7 +306,9 @@ class BaseDecoder(ABC):
 			input_ids=input_ids,
 			attention_mask=attention_mask,
 			ft_labels=ft_labels,
-			dapt_labels=dapt_labels
+			dapt_labels=dapt_labels,
+			token_type_ids=token_type_ids,
+			pixel_values=pixel_values
 		)
 	
 	def _build_dataset(
@@ -345,7 +387,7 @@ class BaseDecoder(ABC):
 		log_callback = LogCollectorCallback()
 
 		trainer = SFTTrainer
-		if self.legacy_trainer:
+		if self.can_handle_image_processing:
 			trainer = Trainer
 		
 		trainer = trainer(
@@ -429,8 +471,13 @@ class BaseDecoder(ABC):
 		if model_input is None:
 			return None
 		
-		input_ids = model_input.input_ids.unsqueeze(0).to(self.model.device)
-		attention_mask = model_input.attention_mask.unsqueeze(0).to(self.model.device)
+		input_dict = {}
+		input_dict["input_ids"] = model_input.input_ids.unsqueeze(0).to(self.model.device)
+		input_dict["attention_mask"] = model_input.attention_mask.unsqueeze(0).to(self.model.device)
+		if model_input.token_type_ids:
+			input_dict["token_type_ids"] = model_input.token_type_ids.unsqueeze(0).to(self.model.device)
+		if model_input.pixel_values:
+			input_dict["pixel_values"] = model_input.pixel_values.unsqueeze(0).to(self.model.device)
 
 		self.model.eval()
 		self.model.gradient_checkpointing_disable()
@@ -449,8 +496,7 @@ class BaseDecoder(ABC):
 		start = time()
 		with torch.no_grad():
 			outputs = self.model.generate(
-				input_ids=input_ids,
-				attention_mask=attention_mask,
+				**input_dict,
 				use_cache=True,
 				eos_token_id=self.stop_token_ids,
 				pad_token_id=self.tokenizer.pad_token_id,
@@ -463,7 +509,7 @@ class BaseDecoder(ABC):
 
 		self._log(f"Response generated in {total_time:.4f} seconds")
 
-		return input_ids.shape[1], outputs
+		return input_dict["input_ids"].shape[1], outputs
 	
 	def _generate_stream(
 		self,
@@ -485,8 +531,13 @@ class BaseDecoder(ABC):
 		if model_input is None:
 			return None
 		
-		input_ids = model_input.input_ids.unsqueeze(0).to(self.model.device)
-		attention_mask = model_input.attention_mask.unsqueeze(0).to(self.model.device)
+		input_dict = {}
+		input_dict["input_ids"] = model_input.input_ids.unsqueeze(0).to(self.model.device)
+		input_dict["attention_mask"] = model_input.attention_mask.unsqueeze(0).to(self.model.device)
+		if model_input.token_type_ids:
+			input_dict["token_type_ids"] = model_input.token_type_ids.unsqueeze(0).to(self.model.device)
+		if model_input.pixel_values:
+			input_dict["pixel_values"] = model_input.pixel_values.unsqueeze(0).to(self.model.device)
 
 		streamer = TextIteratorStreamer(
 			cast(AutoTokenizer, self.tokenizer),
@@ -507,8 +558,7 @@ class BaseDecoder(ABC):
 
 		generate_fn = partial(
 			self.model.generate,
-			input_ids=input_ids,
-			attention_mask=attention_mask,
+			**input_dict,
 			use_cache=True,
 			eos_token_id=self.stop_token_ids,
 			pad_token_id=self.tokenizer.pad_token_id,
@@ -573,3 +623,5 @@ class BaseDecoder(ABC):
 	def __del__(self) -> None:
 		self.unload_model()
 		del self.tokenizer
+		if self.can_handle_image_processing:
+			del self.processor

@@ -12,12 +12,12 @@ from llmflowstack.utils.logging import LogLevel
 class Gemma3(BaseDecoder):
 	model: Gemma3ForCausalLM | None = None
 	max_context_len = 32768
-	legacy_trainer = True
+	can_handle_image_processing = True
 
 	def __init__(
 		self,
 		checkpoint: str | None = None,
-		quantization: Literal["4bit"] | None = None,
+		quantization: bool | None = None,
 		seed: int | None = None
 	) -> None:
 		return super().__init__(
@@ -42,7 +42,7 @@ class Gemma3(BaseDecoder):
 		quantization: Literal["4bit"] | None = None
 	) -> None:
 		quantization_config = None
-		if quantization == "4bit":
+		if quantization:
 			quantization_config = BitsAndBytesConfig(
 				load_in_4bit=True
 			)
@@ -92,8 +92,8 @@ class Gemma3(BaseDecoder):
 		self,
 		input_text: str,
 		output_text: str | None = None,
-		system_message: str | None = None,
-		image_paths: list[str] | None = None
+		image_paths: list[str] | None = None,
+		system_message: str | None = None
 	) -> ModelInput:
 		return self._tokenize(
 			input_text=input_text,
@@ -128,6 +128,9 @@ class Gemma3(BaseDecoder):
 		answer = outputs[0][start_index:]
 
 		decoded = self.tokenizer.decode(answer, skip_special_tokens=True)
+
+		if isinstance(decoded, list):
+			decoded = decoded[0]
 
 		return decoded.strip()
 	

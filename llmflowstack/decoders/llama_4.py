@@ -13,7 +13,7 @@ from llmflowstack.utils.logging import LogLevel
 class Llama4(BaseDecoder):
 	model: Llama4ForCausalLM | None = None
 	max_context_len = 32768
-	legacy_trainer = True
+	can_handle_image_processing = True
 
 	def __init__(
 		self,
@@ -122,6 +122,9 @@ class Llama4(BaseDecoder):
 		answer = outputs[0][start_index:]
 
 		decoded = self.tokenizer.decode(answer, skip_special_tokens=True)
+		
+		if isinstance(decoded, list):
+			decoded = decoded[0]
 
 		return decoded.strip()
 	
