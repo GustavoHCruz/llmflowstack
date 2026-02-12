@@ -15,8 +15,9 @@ from datasets import Dataset
 from PIL import Image
 from torch import Tensor, tensor
 from transformers import (AutoProcessor, AutoTokenizer, BatchFeature,
-                          LogitsProcessorList, PreTrainedTokenizerBase,
-                          StoppingCriteriaList, TextIteratorStreamer, Trainer)
+                          DataCollatorForLanguageModeling, LogitsProcessorList,
+                          PreTrainedTokenizerBase, StoppingCriteriaList,
+                          TextIteratorStreamer, Trainer)
 from transformers.tokenization_utils_base import BatchEncoding
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
@@ -24,6 +25,7 @@ from trl.trainer.sft_trainer import SFTTrainer
 from llmflowstack.callbacks.force_json import (ForceJsonLogitsProcessor,
                                                StopOnJsonComplete)
 from llmflowstack.callbacks.log_collector import LogCollectorCallback
+from llmflowstack.collators.multimodal_causal import MultimodalCausalCollator
 from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
@@ -231,7 +233,6 @@ class BaseDecoder(ABC):
 		input_text: list[str] | str,
 		output_text: str | None = None,
 		follow_prompt_format: bool = True,
-		image_paths: list[str] | None = None,
 		*args: Any,
 		**kwargs: Any
 	) -> ModelInput:
@@ -251,6 +252,8 @@ class BaseDecoder(ABC):
 				input_text=input_text,
 				output_text=output_text
 			)
+
+		image_paths = kwargs.get("image_paths", None)
 		
 		if image_paths and self.processor is not None:
 			images = []
@@ -417,7 +420,10 @@ class BaseDecoder(ABC):
 			train_dataset=train_dataset,
 			eval_dataset=eval_dataset,
 			args=training_arguments,
-			callbacks=[log_callback]
+			callbacks=[log_callback],
+			data_collator=MultimodalCausalCollator(
+				tokenizer=self.tokenizer
+			) if self.can_handle_image_processing else None
 		)
 
 		trainer.train()
