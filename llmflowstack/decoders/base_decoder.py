@@ -47,8 +47,7 @@ class BaseDecoder(ABC):
 	model_is_quantized = None
 	seed = None
 	stop_token_ids = []
-	question_fields = []
-	answer_fields = []
+	_fields = []
 	max_context_len: int = 1024
 	can_handle_image_processing = False
 
@@ -227,7 +226,17 @@ class BaseDecoder(ABC):
 		**kwargs: Any
 	) -> str:
 		pass
-		
+	
+	def _squeeze_1d(
+		self,
+		x: Any
+	) -> torch.Tensor:
+		if isinstance(x, list):
+			return torch.tensor(x, dtype=torch.long)
+		if x.dim() == 2 and x.size(0) == 1:
+			return x[0]
+		return x
+
 	def _tokenize(
 		self,
 		input_text: list[str] | str,
@@ -283,7 +292,7 @@ class BaseDecoder(ABC):
 
 		input_ids = tensor(input_ids, dtype=torch.long)
 		attention_mask = tensor(attention_mask, dtype=torch.bool)
-		if token_type_ids:
+		if token_type_ids is not None:
 			token_type_ids = tensor(token_type_ids, dtype=torch.long)
 
 		if follow_prompt_format:
@@ -319,7 +328,7 @@ class BaseDecoder(ABC):
 
 		partial_input_ids = tensor(tokenized_partial_input["input_ids"], dtype=torch.long)
 
-		start = int(partial_input_ids.shape[0])
+		start = self._squeeze_1d(partial_input_ids).numel()
 
 		ft_labels = torch.full_like(input_ids, -100)
 		ft_labels[start:] = input_ids[start:]
