@@ -2,7 +2,7 @@ from typing import Iterator
 
 from torchao.quantization import Int4WeightOnlyConfig
 from transformers import TorchAoConfig
-from transformers.models.llama4 import Llama4ForCausalLM
+from transformers.models.llama4 import Llama4ForConditionalGeneration
 
 from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
 from llmflowstack.schemas.params import GenerationParams
@@ -11,21 +11,9 @@ from llmflowstack.utils.logging import LogLevel
 
 
 class Llama4(BaseDecoder):
-	model: Llama4ForCausalLM | None = None
+	model: Llama4ForConditionalGeneration | None = None
 	max_context_len = 32768
 	can_handle_image_processing = True
-
-	def __init__(
-		self,
-		checkpoint: str | None = None,
-		quantization: bool | None = None,
-		seed: int | None = None
-	) -> None:
-		return super().__init__(
-			checkpoint=checkpoint,
-			quantization=quantization,
-			seed=seed
-		)
 
 	def _set_generation_stopping_tokens(
 		self,
@@ -40,33 +28,29 @@ class Llama4(BaseDecoder):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: bool | None = None
+		quantization: bool | None = None,
+		max_memory: dict | None = None
 	) -> None:
 		quantization_config = None
 		if quantization:
 			quant_config = Int4WeightOnlyConfig(group_size=128)
 			quantization_config = TorchAoConfig(quant_type=quant_config)
 
-		self.model = Llama4ForCausalLM.from_pretrained(
+		self.model = Llama4ForConditionalGeneration.from_pretrained(
 			checkpoint,
 			quantization_config=quantization_config,
 			attn_implementation="sdpa",
 			dtype="auto",
-			device_map="auto"
+			device_map="auto",
+			max_memory=max_memory
 		)
-	
-	def load_checkpoint(
-		self,
-		checkpoint: str,
-		quantization: bool | None = None
-	) -> None:
-		return super().load_checkpoint(checkpoint, quantization)
 
 	def _build_prompt(
 		self,
 		input_text: str,
 		output_text: str | None = None,
-		system_message: str | None = None
+		system_message: str | None = None,
+		image_paths: list[str] | None = None
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
@@ -77,10 +61,13 @@ class Llama4(BaseDecoder):
 		answer = "<|header_start|>assistant<|header_end|>\n\n"
 		answer += f"{output_text}<|eot|>" if output_text else ""
 
+		image_text = len(image_paths or []) * "<|image_start|><|image|><|image_end|>"
+
 		return (
 			"<|begin_of_text|>"
 			f"{system_message}"
 			"<|header_start|>user<|header_end|>\n\n"
+			f"{image_text}"
 			f"{input_text}<|eot|>"
 			f"{answer}"
 		)
@@ -89,13 +76,15 @@ class Llama4(BaseDecoder):
 		self,
 		input_text: str,
 		output_text: str | None = None,
-		system_message: str | None = None
+		system_message: str | None = None,
+		image_paths: list[str] | None = None
 	) -> ModelInput:
 		return self._tokenize(
 			input_text=input_text,
 			output_text=output_text,
 			follow_prompt_format=True,
-			system_message=system_message
+			system_message=system_message,
+			image_paths=image_paths
 		)
 
 	def generate(

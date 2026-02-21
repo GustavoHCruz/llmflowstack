@@ -1,4 +1,4 @@
-from typing import Iterator, Literal
+from typing import Iterator
 
 from torchao.quantization import Int4WeightOnlyConfig
 from transformers import TorchAoConfig
@@ -15,18 +15,6 @@ class Gemma3(BaseDecoder):
 	max_context_len = 32768
 	can_handle_image_processing = True
 
-	def __init__(
-		self,
-		checkpoint: str | None = None,
-		quantization: bool | None = None,
-		seed: int | None = None
-	) -> None:
-		return super().__init__(
-			checkpoint=checkpoint,
-			quantization=quantization,
-			seed=seed
-		)
-
 	def _set_generation_stopping_tokens(
 		self,
 		tokens: list[int]
@@ -40,7 +28,8 @@ class Gemma3(BaseDecoder):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: bool | None = None
+		quantization: bool | None = None,
+		max_memory: dict | None = None
 	) -> None:
 		quantization_config = None
 		if quantization:
@@ -52,15 +41,9 @@ class Gemma3(BaseDecoder):
 			quantization_config=quantization_config,
 			attn_implementation="sdpa",
 			dtype="auto",
-			device_map="auto"
+			device_map="auto",
+			max_memory=max_memory
 		)
-	
-	def load_checkpoint(
-		self,
-		checkpoint: str,
-		quantization: Literal['4bit'] | None = None
-	) -> None:
-		return super().load_checkpoint(checkpoint, quantization)
 
 	def _build_prompt(
 		self,
@@ -103,8 +86,8 @@ class Gemma3(BaseDecoder):
 		self,
 		input_text: list[str] | str,
 		output_text: str | None = None,
-		image_paths: list[str] | None = None,
-		system_message: str | None = None
+		system_message: str | None = None,
+		image_paths: list[str] | None = None
 	) -> ModelInput:
 		return self._tokenize(
 			input_text=input_text,

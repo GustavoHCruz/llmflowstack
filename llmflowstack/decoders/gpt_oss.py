@@ -14,18 +14,6 @@ class GptOss(BaseDecoder):
 	reasoning_level: Literal["Low", "Medium", "High", "Off"] = "Low"
 	max_context_len = 32768
 
-	def __init__(
-		self,
-		checkpoint: str | None = None,
-		quantization: bool | None = None,
-		seed: int | None = None
-	) -> None:
-		return super().__init__(
-			checkpoint=checkpoint,
-			quantization=quantization,
-			seed=seed
-		)
-
 	def _set_generation_stopping_tokens(
 		self,
 		tokens: list[int]
@@ -39,7 +27,8 @@ class GptOss(BaseDecoder):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: bool | None = False
+		quantization: bool | None = False,
+		max_memory: dict | None = None
 	) -> None:
 		if quantization:
 			quantization_config = Mxfp4Config(dequantize=False)
@@ -51,7 +40,8 @@ class GptOss(BaseDecoder):
 				checkpoint,
 				quantization_config=quantization_config,
 				dtype="auto",
-				device_map="auto"
+				device_map="auto",
+				max_memory=max_memory
 			)
 		except Exception as _:
 			self._log("Error trying to load the model. Defaulting to load without quantization...", LogLevel.WARNING)
@@ -60,13 +50,6 @@ class GptOss(BaseDecoder):
 				dtype="auto",
 				device_map="auto"
 			)
-	
-	def load_checkpoint(
-		self,
-		checkpoint: str,
-		quantization: bool | None = None
-	) -> None:
-		return super().load_checkpoint(checkpoint, quantization)
 
 	def _build_prompt(
 		self,

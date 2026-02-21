@@ -14,18 +14,6 @@ class Llama3(BaseDecoder):
 	model: LlamaForCausalLM | None = None
 	max_context_len = 8192
 
-	def __init__(
-		self,
-		checkpoint: str | None = None,
-		quantization: bool | None = None,
-		seed: int | None = None
-	) -> None:
-		return super().__init__(
-			checkpoint=checkpoint,
-			quantization=quantization,
-			seed=seed
-		)
-
 	def _set_generation_stopping_tokens(
 		self,
 		tokens: list[int]
@@ -39,7 +27,8 @@ class Llama3(BaseDecoder):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: bool | None = None
+		quantization: bool | None = None,
+		max_memory: dict | None = None
 	) -> None:
 		quantization_config = None
 		if quantization:
@@ -51,16 +40,10 @@ class Llama3(BaseDecoder):
 			quantization_config=quantization_config,
 			attn_implementation="sdpa",
 			dtype="auto",
-			device_map="auto"
+			device_map="auto",
+			max_memory=max_memory
 		)
 	
-	def load_checkpoint(
-		self,
-		checkpoint: str,
-		quantization: bool | None = None
-	) -> None:
-		return super().load_checkpoint(checkpoint, quantization)
-
 	def _build_prompt(
 		self,
 		input_text: str,

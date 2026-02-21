@@ -13,18 +13,6 @@ class Gpt2(BaseDecoder):
 	model: GPT2LMHeadModel | None = None
 	max_context_len = 1024
 
-	def __init__(
-		self,
-		checkpoint: str | None = None,
-		quantization: bool | None = None,
-		seed: int | None = None
-	) -> None:
-		return super().__init__(
-			checkpoint=checkpoint,
-			quantization=quantization,
-			seed=seed
-		)
-
 	def _set_generation_stopping_tokens(
 		self,
 		tokens: list[int]
@@ -37,7 +25,8 @@ class Gpt2(BaseDecoder):
 	def _load_model(
 		self,
 		checkpoint: str,
-		quantization: bool | None = False
+		quantization: bool | None = False,
+		max_memory: dict | None = None
 	) -> None:
 		quantization_config = None
 		if quantization:
@@ -49,7 +38,8 @@ class Gpt2(BaseDecoder):
 			quantization_config=quantization_config,
 			attn_implementation="sdpa",
 			dtype="auto",
-			device_map="auto"
+			device_map="auto",
+			max_memory=max_memory
 		)
 	
 	def _build_prompt(
