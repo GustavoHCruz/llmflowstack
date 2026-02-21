@@ -15,9 +15,8 @@ from datasets import Dataset
 from PIL import Image
 from torch import Tensor, tensor
 from transformers import (AutoProcessor, AutoTokenizer, BatchFeature,
-                          DataCollatorForLanguageModeling, LogitsProcessorList,
-                          PreTrainedTokenizerBase, StoppingCriteriaList,
-                          TextIteratorStreamer, Trainer)
+                          LogitsProcessorList, PreTrainedTokenizerBase,
+                          StoppingCriteriaList, TextIteratorStreamer, Trainer)
 from transformers.tokenization_utils_base import BatchEncoding
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
@@ -55,6 +54,7 @@ class BaseDecoder(ABC):
 		self,
 		checkpoint: str | None = None,
 		quantization: bool | None = None,
+		max_memory: dict | None = None,
 		seed: int | None = None
 	) -> None:
 		if seed:
@@ -67,10 +67,10 @@ class BaseDecoder(ABC):
 		self.tokenizer: PreTrainedTokenizerBase | None = None
 
 		if checkpoint:
-			self._checkpoint = checkpoint
 			self.load_checkpoint(
 				checkpoint=checkpoint,
-				quantization=quantization
+				quantization=quantization,
+				max_memory=max_memory
 			)
 
 			if quantization:
@@ -91,8 +91,8 @@ class BaseDecoder(ABC):
 	def _load_model(
 		self,
 		checkpoint: str,
-		*args: Any,
-		**kwargs: Any
+		quantization: bool | None = None,
+		max_memory: dict | None = None
 	) -> None:
 		pass
 
@@ -121,7 +121,8 @@ class BaseDecoder(ABC):
 	def load_checkpoint(
 		self,
 		checkpoint: str,
-		quantization: Any
+		quantization: bool | None = None,
+		max_memory: dict | None = None
 	) -> None:
 		if self.model:
 			self._log("A model is already loaded. Attempting to reset it.", LogLevel.WARNING)
@@ -134,7 +135,8 @@ class BaseDecoder(ABC):
 		)
 		self._load_model(
 			checkpoint=checkpoint,
-			quantization=quantization
+			quantization=quantization,
+			max_memory=max_memory
 		)
 		if self.can_handle_image_processing:
 			self._load_processor(
@@ -278,8 +280,14 @@ class BaseDecoder(ABC):
 			)
 			input_ids = processor_output["input_ids"][0]
 			attention_mask = processor_output["attention_mask"][0]
-			token_type_ids = processor_output["token_type_ids"][0]
-			pixel_values = torch.stack(processor_output["pixel_values"], dim=0)
+			token_type_ids = None
+			if processor_output.get("token_type_ids"):
+				token_type_ids = processor_output["token_type_ids"][0]
+			pixel_values = processor_output.get("pixel_values")
+			if isinstance(pixel_values, list):
+				pixel_values = torch.cat(pixel_values)
+			else:
+				pixel_values = torch.stack(processor_output["pixel_values"], dim=0)
 		else:
 			tokenizer_output: BatchEncoding = self.tokenizer(
 				text=promptfied_input,
@@ -394,7 +402,7 @@ class BaseDecoder(ABC):
 			per_device_train_batch_size=params.batch_size,
 			per_device_eval_batch_size=params.batch_size,
 			gradient_accumulation_steps=params.gradient_accumulation,
-			gradient_checkpointing=True,
+			gradient_checkpointing=False,
 			warmup_ratio=params.warmup_ratio,
 			lr_scheduler_type="cosine_with_min_lr",
 			lr_scheduler_kwargs = {"min_lr_rate": 0.1},
