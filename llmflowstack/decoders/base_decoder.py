@@ -15,8 +15,9 @@ from datasets import Dataset
 from PIL import Image
 from torch import Tensor, tensor
 from transformers import (AutoProcessor, AutoTokenizer, BatchFeature,
-                          LogitsProcessorList, PreTrainedTokenizerBase,
-                          StoppingCriteriaList, TextIteratorStreamer, Trainer)
+                          Llama4ForConditionalGeneration, LogitsProcessorList,
+                          PreTrainedTokenizerBase, StoppingCriteriaList,
+                          TextIteratorStreamer, Trainer)
 from transformers.tokenization_utils_base import BatchEncoding
 from trl.trainer.sft_config import SFTConfig
 from trl.trainer.sft_trainer import SFTTrainer
@@ -283,11 +284,13 @@ class BaseDecoder(ABC):
 			token_type_ids = None
 			if processor_output.get("token_type_ids"):
 				token_type_ids = processor_output["token_type_ids"][0]
+
 			pixel_values = processor_output.get("pixel_values")
-			if isinstance(pixel_values, list):
+			if isinstance(self.model, Llama4ForConditionalGeneration):
 				pixel_values = torch.cat(pixel_values)
 			else:
 				pixel_values = torch.stack(processor_output["pixel_values"], dim=0)
+				
 		else:
 			tokenizer_output: BatchEncoding = self.tokenizer(
 				text=promptfied_input,
