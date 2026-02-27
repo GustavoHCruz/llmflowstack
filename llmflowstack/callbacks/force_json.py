@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-from typing import Literal, cast
+from typing import Literal
 
-import torch
 from torch import BoolTensor, FloatTensor, LongTensor, topk
 from transformers import LogitsProcessor, StoppingCriteria
 
