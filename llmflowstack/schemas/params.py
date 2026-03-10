@@ -9,7 +9,7 @@ class TrainParams:
 	batch_size: int = 1
 	gradient_accumulation: int = 8
 	epochs: int = 1
-	warmup_ratio: float = 0.0
+	warmup_steps: int = 0
 	lr: float = 2e-5
 	optim: Literal[
 		"adamw_torch",

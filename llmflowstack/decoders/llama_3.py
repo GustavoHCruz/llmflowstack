@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Iterator
 
 from torchao.quantization import Int4WeightOnlyConfig
@@ -26,7 +27,7 @@ class Llama3(BaseDecoder):
 
 	def _load_model(
 		self,
-		checkpoint: str,
+		checkpoint: str | Path,
 		quantization: bool | None = None,
 		max_memory: dict | None = None
 	) -> None:
@@ -48,7 +49,7 @@ class Llama3(BaseDecoder):
 		self,
 		input_text: str,
 		output_text: str | None = None,
-		system_message: str | None = None
+		system_text: str | None = None
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
@@ -56,7 +57,7 @@ class Llama3(BaseDecoder):
 		answer = f"{output_text}{self.tokenizer.eos_token}" if output_text else ""
 
 		return (
-			f"<|start_header_id|>system<|end_header_id|>{system_message or ""}\n"
+			f"<|start_header_id|>system<|end_header_id|>{system_text or ""}\n"
 			f"<|eot_id|><|start_header_id|>user<|end_header_id|>{input_text}\n"
 			f"<|eot_id|><|start_header_id|>assistant<|end_header_id|>{answer}"
 		)
@@ -66,13 +67,13 @@ class Llama3(BaseDecoder):
 		input_text: str,
 		output_text: str | None = None,
 		follow_prompt_format: bool = True,
-		system_message: str | None = None
+		system_text: str | None = None
 	) -> ModelInput:
 		return self._tokenize(
 			input_text=input_text,
 			output_text=output_text,
 			follow_prompt_format=follow_prompt_format,
-			system_message=system_message
+			system_text=system_text
 		)
 
 	def generate(

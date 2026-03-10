@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Iterator
 
 from torchao.quantization import Int4WeightOnlyConfig
@@ -24,7 +25,7 @@ class Gpt2(BaseDecoder):
 
 	def _load_model(
 		self,
-		checkpoint: str,
+		checkpoint: str | Path,
 		quantization: bool | None = False,
 		max_memory: dict | None = None
 	) -> None:

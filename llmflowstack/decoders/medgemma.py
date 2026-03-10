@@ -2,8 +2,7 @@ from pathlib import Path
 from typing import Iterator
 
 from torchao.quantization import Int4WeightOnlyConfig
-from transformers import TorchAoConfig
-from transformers.models.gemma3 import Gemma3ForConditionalGeneration
+from transformers import Gemma3ForConditionalGeneration, TorchAoConfig
 
 from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
 from llmflowstack.schemas.params import GenerationParams
@@ -11,7 +10,7 @@ from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
 
 
-class Gemma3(BaseDecoder):
+class MedGemma(BaseDecoder):
 	model: Gemma3ForConditionalGeneration | None = None
 	max_context_len = 32768
 	can_handle_image_processing = True
@@ -25,7 +24,7 @@ class Gemma3(BaseDecoder):
 			return None
 		particular_tokens = self.tokenizer.encode("<end_of_turn>")
 		self.stop_token_ids = tokens + particular_tokens
-
+	
 	def _load_model(
 		self,
 		checkpoint: str | Path,
@@ -45,7 +44,7 @@ class Gemma3(BaseDecoder):
 			device_map="auto",
 			max_memory=max_memory
 		)
-
+	
 	def _build_prompt(
 		self,
 		input_text: list[str] | str,
@@ -56,12 +55,7 @@ class Gemma3(BaseDecoder):
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		system_text = system_text or ""
-		if not system_text:
-			system_text = ""
-
-		if system_text:
-			system_text = f"{system_text}\n"
+		system_text = f"Think silently if needed. {system_text or ""}\n"
 
 		input_final_text = ""
 		if image_paths is not None and isinstance(input_text, list) and len(image_paths) == len(input_text):
@@ -107,7 +101,7 @@ class Gemma3(BaseDecoder):
 		if self.tokenizer is None:
 			self._log("Tokenizer missing", LogLevel.WARNING)
 			return None
-		
+
 		generation_outputs = self._generate(
 			data=data,
 			params=params,
@@ -120,14 +114,23 @@ class Gemma3(BaseDecoder):
 		
 		start_index, outputs = generation_outputs
 
-		answer = outputs[0][start_index:]
+		answer = self.tokenizer.decode(outputs[0])
 
-		decoded = self.tokenizer.decode(answer, skip_special_tokens=True)
+		if isinstance(answer, list):
+			answer = answer[0]
 
-		if isinstance(decoded, list):
-			decoded = decoded[0]
+		start = answer.rfind("<unused95>", start_index)
+		if start == -1:
+			start = answer.rfind("<start_of_turn>model")
+			start = start + len("<start_of_turn>model")
+		else:
+			start = start + len("<unused95>")
 
-		return decoded.strip()
+		end = answer.find("<end_of_turn>", start)
+		if end == -1:
+			end = len(answer)
+
+		return answer[start:end].strip()
 	
 	def generate_stream(
 		self,
@@ -135,9 +138,32 @@ class Gemma3(BaseDecoder):
 		params: GenerationParams | None = None,
 		force_json: bool = False
 	) -> Iterator[str]:
-		return self._generate_stream(
+		streamer = self._generate_stream(
 			data=data,
 			params=params,
 			force_json=force_json,
 			follow_prompt_format=True
 		)
+
+		done_thinking = False
+		buffer = ""
+		
+		for new_text in streamer:
+			buffer += new_text
+
+			if done_thinking is None:
+				if len(buffer.split()) > 5:
+					done_thinking = False
+					continue
+
+				lower_buffer = buffer.lower()
+				if lower_buffer.find("thought") != -1 or lower_buffer.find("<unused94>") != -1:
+					done_thinking = True
+					continue
+			elif not done_thinking:
+				yield buffer
+				buffer = "" 
+			else:
+				if buffer.find("<unused95>") != -1:
+					done_thinking = False
+					buffer = buffer.split("<unused95>", 1)[1]

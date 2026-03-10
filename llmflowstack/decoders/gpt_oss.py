@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Iterator, Literal
 
 from transformers.models.gpt_oss import GptOssForCausalLM
@@ -18,15 +19,12 @@ class GptOss(BaseDecoder):
 		self,
 		tokens: list[int]
 	) -> None:
-		if not self.tokenizer:
-			self._log("Could not set stop tokens - generation may not work...", LogLevel.WARNING)
-			return None
 		particular_tokens = [200012, 200002]
 		self.stop_token_ids = particular_tokens + tokens
 
 	def _load_model(
 		self,
-		checkpoint: str,
+		checkpoint: str | Path,
 		quantization: bool | None = False,
 		max_memory: dict | None = None
 	) -> None:
@@ -55,24 +53,24 @@ class GptOss(BaseDecoder):
 		self,
 		input_text: str,
 		output_text: str | None = None,
-		system_message: str | None = None,
-		developer_message: str | None = None,
-		reasoning_message: str | None = None
+		system_text: str | None = None,
+		developer_text: str | None = None,
+		reasoning_text: str | None = None
 	) -> str:
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\nReasoning: {self.reasoning_level}\n\n{system_message or ''}# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|>"
+		system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\nReasoning: {self.reasoning_level}\n\n{system_text or ''}# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|>"
 		if self.reasoning_level == "Off":
-			system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\n{system_message}# Valid channels: final. Channel must be included for every message.<|end|>"
+			system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\n{system_text}# Valid channels: final. Channel must be included for every message.<|end|>"
 
 		developer_text = ""
-		if developer_message:
-			developer_text = f"<|start|>developer<|message|># Instructions\n\n{developer_message or ''}<|end|>"
+		if developer_text:
+			developer_text = f"<|start|>developer<|message|># Instructions\n\n{developer_text or ''}<|end|>"
 
 		assistant_text = ""
-		if reasoning_message:
-			assistant_text += f"<|start|>assistant<|channel|>analysis<|message|>{reasoning_message or ''}<|end|>"
+		if reasoning_text:
+			assistant_text += f"<|start|>assistant<|channel|>analysis<|message|>{reasoning_text or ''}<|end|>"
 
 		if output_text:
 			assistant_text += f"<|start|>assistant<|channel|>final<|message|>{output_text or ''}<|return|>"
@@ -90,17 +88,17 @@ class GptOss(BaseDecoder):
 		self,
 		input_text: str,
 		output_text: str | None = None,
-		system_message: str | None = None,
-		developer_message: str | None = None,
-		reasoning_message: str | None = None
+		system_text: str | None = None,
+		developer_text: str | None = None,
+		reasoning_text: str | None = None
 	) -> ModelInput:		
 		return self._tokenize(
 			input_text=input_text,
 			output_text=output_text,
 			follow_prompt_format=True,
-			system_message=system_message,
-			developer_message=developer_message,
-			reasoning_message=reasoning_message
+			system_text=system_text,
+			developer_text=developer_text,
+			reasoning_text=reasoning_text
 		)
 
 	def set_reasoning_level(

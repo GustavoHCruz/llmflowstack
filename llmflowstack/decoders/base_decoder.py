@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from functools import partial
 from logging import getLogger
+from pathlib import Path
 from time import time
 from typing import Any, Iterator, Literal, cast
 
@@ -15,6 +16,7 @@ from datasets import Dataset
 from PIL import Image
 from torch import Tensor, tensor
 from transformers import (AutoProcessor, AutoTokenizer, BatchFeature,
+                          Gemma3ForConditionalGeneration,
                           Llama4ForConditionalGeneration, LogitsProcessorList,
                           PreTrainedTokenizerBase, StoppingCriteriaList,
                           TextIteratorStreamer, Trainer)
@@ -38,6 +40,7 @@ class ModelInput:
 	ft_labels: Tensor
 	dapt_labels: Tensor
 	token_type_ids: Tensor | None
+	image_grid_thw: Tensor | None
 	pixel_values: Tensor | None
 
 class BaseDecoder(ABC):
@@ -53,7 +56,7 @@ class BaseDecoder(ABC):
 
 	def __init__(
 		self,
-		checkpoint: str | None = None,
+		checkpoint: str | Path | None = None,
 		quantization: bool | None = None,
 		max_memory: dict | None = None,
 		seed: int | None = None
@@ -91,7 +94,7 @@ class BaseDecoder(ABC):
 	@abstractmethod
 	def _load_model(
 		self,
-		checkpoint: str,
+		checkpoint: str | Path,
 		quantization: bool | None = None,
 		max_memory: dict | None = None
 	) -> None:
@@ -99,7 +102,7 @@ class BaseDecoder(ABC):
 
 	def _load_tokenizer(
 		self,
-		checkpoint: str
+		checkpoint: str | Path
 	) -> None:
 		tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 		tokenizer.pad_token = tokenizer.eos_token
@@ -110,7 +113,7 @@ class BaseDecoder(ABC):
 	
 	def _load_processor(
 		self,
-		checkpoint: str
+		checkpoint: str | Path
 	) -> None:
 		processor = AutoProcessor.from_pretrained(
 			checkpoint,
@@ -121,7 +124,7 @@ class BaseDecoder(ABC):
 	
 	def load_checkpoint(
 		self,
-		checkpoint: str,
+		checkpoint: str | Path,
 		quantization: bool | None = None,
 		max_memory: dict | None = None
 	) -> None:
@@ -284,13 +287,19 @@ class BaseDecoder(ABC):
 			token_type_ids = None
 			if processor_output.get("token_type_ids"):
 				token_type_ids = processor_output["token_type_ids"][0]
+			
+			image_grid_thw = None
+			if "image_grid_thw" in processor_output:
+				image_grid_thw = processor_output["image_grid_thw"]
 
 			pixel_values = processor_output.get("pixel_values")
+
 			if isinstance(self.model, Llama4ForConditionalGeneration):
 				pixel_values = torch.cat(pixel_values)
-			else:
+			elif isinstance(self.model, Gemma3ForConditionalGeneration):
+				if isinstance(pixel_values, list):
+					pixel_values = pixel_values[0]
 				pixel_values = torch.stack(processor_output["pixel_values"], dim=0)
-				
 		else:
 			tokenizer_output: BatchEncoding = self.tokenizer(
 				text=promptfied_input,
@@ -299,12 +308,16 @@ class BaseDecoder(ABC):
 			input_ids = tokenizer_output["input_ids"]
 			attention_mask = tokenizer_output["attention_mask"]
 			token_type_ids = None
+			image_grid_thw = None
 			pixel_values = None
 
 		input_ids = tensor(input_ids, dtype=torch.long)
 		attention_mask = tensor(attention_mask, dtype=torch.bool)
 		if token_type_ids is not None:
 			token_type_ids = tensor(token_type_ids, dtype=torch.long)
+		
+		if image_grid_thw is not None and isinstance(image_grid_thw, list):
+			image_grid_thw = tensor(image_grid_thw, dtype=torch.long)
 
 		if follow_prompt_format:
 			promptfied_partial_input = self._build_prompt(
@@ -353,7 +366,8 @@ class BaseDecoder(ABC):
 			ft_labels=ft_labels,
 			dapt_labels=dapt_labels,
 			token_type_ids=token_type_ids,
-			pixel_values=pixel_values
+			image_grid_thw=image_grid_thw,
+			pixel_values=pixel_values,
 		)
 	
 	def _build_dataset(
@@ -361,18 +375,29 @@ class BaseDecoder(ABC):
 		dataset: list[ModelInput],
 		mode: Literal["FT", "DAPT"]
 	) -> Dataset:
-		if mode == "DAPT":
-			return Dataset.from_list([{
+		rows = []
+
+		for data in dataset:
+			row = {
 				"input_ids": data.input_ids,
 				"attention_mask": data.attention_mask,
-				"labels": data.dapt_labels
-			} for data in dataset])
-		
-		return Dataset.from_list([{
-			"input_ids": data.input_ids,
-			"attention_mask": data.attention_mask,
-			"labels": data.ft_labels
-		} for data in dataset])
+				"labels": data.dapt_labels if mode == "DAPT" else data.ft_labels
+			}
+
+			if data.token_type_ids is not None:
+				row["token_type_ids"] = data.token_type_ids
+			elif self.can_handle_image_processing:
+				row["token_type_ids"] = torch.zeros_like(data.input_ids)
+
+			if data.image_grid_thw is not None:
+				row["image_grid_thw"] = data.image_grid_thw
+
+			if data.pixel_values is not None:
+				row["pixel_values"] = data.pixel_values.squeeze(0)
+			
+			rows.append(row)
+
+		return Dataset.from_list(rows)
 	
 	def train(
 		self,
@@ -406,7 +431,7 @@ class BaseDecoder(ABC):
 			per_device_eval_batch_size=params.batch_size,
 			gradient_accumulation_steps=params.gradient_accumulation,
 			gradient_checkpointing=False,
-			warmup_ratio=params.warmup_ratio,
+			warmup_steps=params.warmup_steps,
 			lr_scheduler_type="cosine_with_min_lr",
 			lr_scheduler_kwargs = {"min_lr_rate": 0.1},
 			label_smoothing_factor=params.label_smoothing_factor,
@@ -504,6 +529,8 @@ class BaseDecoder(ABC):
 			input_dict["token_type_ids"] = model_input.token_type_ids.unsqueeze(0).to(self.model.device)
 		if model_input.pixel_values is not None:
 			input_dict["pixel_values"] = model_input.pixel_values.to(self.model.device)
+		if model_input.image_grid_thw is not None:
+			input_dict["image_grid_thw"] = model_input.image_grid_thw.to(self.model.device)
 
 		return input_dict
 
