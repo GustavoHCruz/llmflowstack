@@ -277,6 +277,23 @@ class VectorDatabase:
 			filter=filter
 		)
 
+	def rquery_with_score(
+		self,
+		collection_name: str,
+		query: str,
+		k: int = 4,
+		filter: dict | None = None
+	) -> list[tuple[Document, float]]:
+		self._validate_collection_name(
+			collection_name=collection_name
+		)
+		
+		return self.collections[collection_name].similarity_search_with_score(
+			query=query,
+			k=k,
+			filter=filter
+		)
+
 	def query(
 		self,
 		collection_name: str,
