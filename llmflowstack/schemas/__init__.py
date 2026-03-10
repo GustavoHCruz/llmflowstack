@@ -1,9 +1,6 @@
-from .params import (GenerationBeamsParams, GenerationParams,
-                     GenerationSampleParams, TrainParams)
+from .params import GenerationParams, TrainParams
 
 __all__ = [
-  "GenerationBeamsParams",
   "GenerationParams",
-  "GenerationSampleParams",
   "TrainParams"
 ]
