@@ -607,7 +607,7 @@ class BaseDecoder(ABC):
 			return None
 
 		streamer = TextIteratorStreamer(
-			cast(AutoTokenizer, self.tokenizer),
+			self.tokenizer,
 			skip_prompt=True,
 			skip_special_tokens=True
 		)

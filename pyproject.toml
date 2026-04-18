@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llmflowstack"
-version = "1.4.0"
+version = "1.4.1"
 authors = [
   { name = "Gustavo Henrique Ferreira Cruz", email = "gustavohferreiracruz@gmail.com" }
 ]
@@ -18,7 +18,6 @@ dependencies = [
   "datasets",
   "fbgemm_gpu_genai",
   "kernels",
-  "mslk-cuda==1.0.0",
   "peft",
   "pillow",
   "safetensors",

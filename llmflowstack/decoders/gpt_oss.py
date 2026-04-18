@@ -60,28 +60,28 @@ class GptOss(BaseDecoder):
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\nReasoning: {self.reasoning_level}\n\n{system_text or ''}# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|>"
+		system_content = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\nReasoning: {self.reasoning_level}\n\n{system_text or ''}# Valid channels: analysis, commentary, final. Channel must be included for every message.<|end|>"
 		if self.reasoning_level == "Off":
 			system_text = f"<|start|>system<|message|>You are ChatGPT, a large language model trained by OpenAI.\nKnowledge cutoff: 2024-06\n\n{system_text}# Valid channels: final. Channel must be included for every message.<|end|>"
 
-		developer_text = ""
+		developer_content = ""
 		if developer_text:
-			developer_text = f"<|start|>developer<|message|># Instructions\n\n{developer_text or ''}<|end|>"
+			developer_content = f"<|start|>developer<|message|># Instructions\n\n{developer_text or ''}<|end|>"
 
-		assistant_text = ""
+		assistant_content = ""
 		if reasoning_text:
-			assistant_text += f"<|start|>assistant<|channel|>analysis<|message|>{reasoning_text or ''}<|end|>"
+			assistant_content += f"<|start|>assistant<|channel|>analysis<|message|>{reasoning_text or ''}<|end|>"
 
 		if output_text:
-			assistant_text += f"<|start|>assistant<|channel|>final<|message|>{output_text or ''}<|return|>"
+			assistant_content += f"<|start|>assistant<|channel|>final<|message|>{output_text or ''}<|return|>"
 
 		if not output_text and self.reasoning_level == "Off":
-			assistant_text = "<|start|>assistant<|channel|>analysis<|message|><|end|><|start|>assistant<|channel|>final<|message|>"
+			assistant_content = "<|start|>assistant<|channel|>analysis<|message|><|end|><|start|>assistant<|channel|>final<|message|>"
 
 		return (
-			f"{system_text}{developer_text}"
+			f"{system_content}{developer_content}"
 			f"<|start|>user<|message|>{input_text}<|end|>"
-			f"{assistant_text}"
+			f"{assistant_content}"
 		)
 		
 	def build_input(

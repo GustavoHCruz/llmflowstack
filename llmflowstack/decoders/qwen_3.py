@@ -84,7 +84,6 @@ class Qwen3(BaseDecoder):
 
 		assistant_content = "<|im_start|>assistant\n"
 
-		# reasoning block (sempre presente para manter template consistente)
 		if enable_reasoning:
 			reasoning = reasoning_text or ""
 			assistant_content += f"<think>\n{reasoning}\n</think>\n\n"
