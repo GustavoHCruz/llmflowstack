@@ -54,12 +54,12 @@ class Llama3(BaseDecoder):
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		answer = f"{output_text}{self.tokenizer.eos_token}" if output_text else ""
+		assistant_content = f"{output_text}{self.tokenizer.eos_token}" if output_text else ""
 
 		return (
 			f"<|start_header_id|>system<|end_header_id|>{system_text or ""}\n"
 			f"<|eot_id|><|start_header_id|>user<|end_header_id|>{input_text}\n"
-			f"<|eot_id|><|start_header_id|>assistant<|end_header_id|>{answer}"
+			f"<|eot_id|><|start_header_id|>assistant<|end_header_id|>{assistant_content}"
 		)
 
 	def build_input(

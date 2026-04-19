@@ -56,31 +56,27 @@ class Gemma3(BaseDecoder):
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
-		system_text = system_text or ""
-		if not system_text:
-			system_text = ""
-
+		system_content = ""
 		if system_text:
-			system_text = f"{system_text}\n"
+			system_content = f"{system_text}\n"
 
-		input_final_text = ""
+		user_content = ""
 		if image_paths is not None and isinstance(input_text, list) and len(image_paths) == len(input_text):
 			for text in input_text:
-				input_final_text += f"<start_of_image>{text}"
+				user_content += f"<start_of_image>{text}"
 		elif image_paths is not None and isinstance(input_text, str):
 			for _ in image_paths:
-				input_final_text += f"<start_of_image>{input_text}"
+				user_content += f"<start_of_image>{input_text}"
 		else:
-			input_final_text = str(input_text)
+			user_content = str(input_text)
 
-		expected_answer = output_text
-		answer = f"{expected_answer}<end_of_turn>" if expected_answer else ""
+		assistant_content = f"{output_text}<end_of_turn>" if output_text else ""
 	
 		return (
 			f"<bos><start_of_turn>user\n"
-			f"{system_text}\n{input_final_text}<end_of_turn>\n"
+			f"{system_content}\n{user_content}<end_of_turn>\n"
 			f"<start_of_turn>model\n"
-			f"{answer}"
+			f"{assistant_content}"
 		)
 
 	def build_input(

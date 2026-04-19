@@ -8,7 +8,7 @@ from functools import partial
 from logging import getLogger
 from pathlib import Path
 from time import time
-from typing import Any, Iterator, Literal, cast
+from typing import Any, Iterator, Literal
 
 import numpy as np
 import torch

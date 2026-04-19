@@ -56,21 +56,22 @@ class Llama4(BaseDecoder):
 		if not self.tokenizer:
 			raise MissingEssentialProp("Could not find tokenizer.")
 
+		system_content = ""
 		if system_text is not None:
-			system_text = f"<|header_start|>system<|header_end|>\n\n{system_text}<|eot|>"
+			system_content = f"<|header_start|>system<|header_end|>\n\n{system_text}<|eot|>"
 
-		answer = "<|header_start|>assistant<|header_end|>\n\n"
-		answer += f"{output_text}<|eot|>" if output_text else ""
+		assistant_content = "<|header_start|>assistant<|header_end|>\n\n"
+		assistant_content += f"{output_text}<|eot|>" if output_text else ""
 
 		image_text = len(image_paths or []) * "<|image_start|><|image|><|image_end|>"
 
 		return (
 			"<|begin_of_text|>"
-			f"{system_text or ""}"
+			f"{system_content}"
 			"<|header_start|>user<|header_end|>\n\n"
 			f"{image_text}"
 			f"{input_text}<|eot|>"
-			f"{answer}"
+			f"{assistant_content}"
 		)
 
 	def build_input(
