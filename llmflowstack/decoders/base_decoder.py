@@ -686,9 +686,3 @@ class BaseDecoder(ABC):
 		self._log(f"Setting seed value {seed}")
 		self._set_seed(seed)
 		self._log(f"Seed setted")
-
-	def __del__(self) -> None:
-		self.unload_model()
-		del self.tokenizer
-		if self.can_handle_image_processing:
-			del self.processor
