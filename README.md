@@ -71,7 +71,7 @@ This framework is designed to provide flexibility when working with different op
 First, install PyTorch with CUDA support (required):
 
 ```bash
-pip install torch==2.10 torchvision==0.25 --index-url https://download.pytorch.org/whl/cu128
+pip install torch==2.13 torchvision==0.28 --index-url https://download.pytorch.org/whl/cu126
 ```
 
 Verify that CUDA is correctly available:
