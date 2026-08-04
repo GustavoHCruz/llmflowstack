@@ -1,7 +1,6 @@
+from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import Iterator
 
-from jinja2 import Template
 from PIL import Image
 from torchao.quantization import Float8WeightOnlyConfig
 from transformers import AutoConfig, TorchAoConfig
@@ -10,7 +9,8 @@ from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import (
     Qwen3_5MoeForConditionalGeneration,
 )
 
-from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
+from llmflowstack.decoders.base_decoder import BaseDecoder, InferenceInput, ModelInput
+from llmflowstack.schemas.messages import ChatMessage
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
@@ -30,13 +30,16 @@ class Qwen3(BaseDecoder):
     def disable_reasoning(self) -> None:
         self.can_think = False
 
+    def _chat_template_kwargs(self) -> dict[str, bool]:
+        return {"enable_thinking": self.can_think}
+
     def _set_generation_stopping_tokens(self, tokens: list[int]) -> None:
         if not self.tokenizer:
             self._log(
                 "Could not set stop tokens - generation may not work...",
                 LogLevel.WARNING,
             )
-            return None
+            return
         particular_tokens = self.tokenizer.encode("<|im_end|>")
         self.stop_token_ids = particular_tokens + tokens
 
@@ -130,14 +133,16 @@ class Qwen3(BaseDecoder):
 
     def generate(
         self,
-        data: str | Template | ModelInput,
+        data: InferenceInput | None = None,
         params: GenerationParams | None = None,
         force_json: bool = False,
         follow_prompt_format: bool = True,
+        messages: Sequence[ChatMessage] | None = None,
     ) -> str | None:
+        data = self._resolve_generation_input(data, messages)
         if self.model is None or self.tokenizer is None:
             self._log("Model or Tokenizer missing", LogLevel.WARNING)
-            return None
+            return
 
         generation_outputs = self._generate(
             data=data,
@@ -147,7 +152,7 @@ class Qwen3(BaseDecoder):
         )
 
         if generation_outputs is None:
-            return None
+            return
 
         start_index, outputs = generation_outputs
 
@@ -172,11 +177,13 @@ class Qwen3(BaseDecoder):
 
     def generate_stream(
         self,
-        data: str | Template | ModelInput,
+        data: InferenceInput | None = None,
         params: GenerationParams | None = None,
         force_json: bool = False,
         follow_prompt_format: bool = True,
+        messages: Sequence[ChatMessage] | None = None,
     ) -> Iterator[str]:
+        data = self._resolve_generation_input(data, messages)
         streamer = self._generate_stream(
             data=data,
             params=params,
