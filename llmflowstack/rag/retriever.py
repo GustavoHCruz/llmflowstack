@@ -6,6 +6,7 @@ from hashlib import sha256
 from typing import Any
 
 from langchain_core.documents import Document
+
 from llmflowstack.rag.document_splitter import DocumentSplitter
 from llmflowstack.rag.vector_store import VectorStore
 
