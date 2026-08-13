@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "llmflowstack"
-version = "1.5.4"
+version = "1.5.5"
 authors = [
   { name = "Gustavo Henrique Ferreira Cruz", email = "gustavohferreiracruz@gmail.com" }
 ]
@@ -21,14 +21,4 @@ dependencies = [
   "transformers==5.10.0",
   "triton==3.7.1; platform_system == 'Linux'",
   "trl==1.6.0",
-]
-
-[project.optional-dependencies]
-rag = [
-  "chromadb==1.5.9",
-  "langchain-core==1.5.1",
-  "langchain-chroma==1.1.0",
-  "langchain-text-splitters==1.1.2",
-  "peft==0.19.1",
-  "sentence-transformers==5.6.1",
 ]
