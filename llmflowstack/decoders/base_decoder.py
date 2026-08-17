@@ -3,7 +3,7 @@ import os
 import random
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import partial
 from logging import getLogger
@@ -39,10 +39,11 @@ from llmflowstack.callbacks.force_json import (
 )
 from llmflowstack.callbacks.log_collector import LogCollectorCallback
 from llmflowstack.collators.multimodal_causal import MultimodalCausalCollator
-from llmflowstack.schemas.messages import ChatMessage, ChatMessages
 from llmflowstack.schemas.params import GenerationParams, TrainParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
+
+type DataInput = str | Template | ModelInput
 
 
 @dataclass
@@ -56,9 +57,6 @@ class ModelInput:
     pixel_values: Tensor | None
 
 
-type InferenceInput = str | Template | ModelInput | Sequence[ChatMessage]
-
-
 class BaseDecoder(ABC):
     model = None
     tokenizer = None
@@ -67,7 +65,6 @@ class BaseDecoder(ABC):
     seed = None
     max_context_len: int = 1024
     can_handle_image_processing = False
-    supports_developer_messages = False
 
     def __init__(
         self,
@@ -231,95 +228,6 @@ class BaseDecoder(ABC):
     def disable_reasoning(self) -> None:
         pass
 
-    def _chat_template_kwargs(self) -> dict[str, Any]:
-        return {}
-
-    def _normalize_chat_messages(self, messages: Sequence[ChatMessage]) -> ChatMessages:
-        normalized = [dict(message) for message in messages]
-
-        if not self.supports_developer_messages:
-            for message in normalized:
-                if message["role"] == "developer":
-                    message["role"] = "system"
-
-            leading_instructions = []
-            while normalized and normalized[0]["role"] == "system":
-                leading_instructions.append(normalized.pop(0)["content"])
-            if leading_instructions:
-                normalized.insert(
-                    0,
-                    {
-                        "role": "system",
-                        "content": "\n\n".join(leading_instructions),
-                    },
-                )
-
-        return cast(ChatMessages, normalized)
-
-    def _render_chat_messages(self, messages: Sequence[ChatMessage]) -> str:
-        if self.tokenizer is None:
-            raise MissingEssentialProp("Tokenizer missing")
-        if not messages:
-            raise ValueError("messages must contain at least one message")
-
-        allowed_roles = {"system", "developer", "user", "assistant"}
-        for index, message in enumerate(messages):
-            if not isinstance(message, Mapping):
-                raise TypeError(f"messages[{index}] must be a mapping")
-            role = message.get("role")
-            content = message.get("content")
-            if role not in allowed_roles:
-                raise ValueError(
-                    f"messages[{index}].role must be one of {sorted(allowed_roles)}"
-                )
-            if not isinstance(content, str):
-                raise TypeError(f"messages[{index}].content must be a string")
-
-        normalized = self._normalize_chat_messages(messages)
-        apply_chat_template = getattr(self.tokenizer, "apply_chat_template", None)
-        chat_template = getattr(self.tokenizer, "chat_template", None)
-
-        if callable(apply_chat_template) and chat_template:
-            rendered = apply_chat_template(
-                normalized,
-                tokenize=False,
-                add_generation_prompt=True,
-                **self._chat_template_kwargs(),
-            )
-            if not isinstance(rendered, str):
-                raise TypeError("The tokenizer chat template did not return text")
-            return rendered
-
-        role_names = {
-            "system": "System",
-            "developer": "Developer",
-            "user": "User",
-            "assistant": "Assistant",
-        }
-        transcript = "\n".join(
-            f"{role_names[message['role']]}: {message['content']}"
-            for message in normalized
-        )
-        return f"{transcript}\nAssistant:"
-
-    def _resolve_generation_input(
-        self,
-        data: InferenceInput | None,
-        messages: Sequence[ChatMessage] | None,
-    ) -> InferenceInput:
-        if data is not None and messages is not None:
-            raise ValueError("Pass either data or messages, not both")
-        if messages is not None:
-            return messages
-        if data is None:
-            raise ValueError("Either data or messages must be provided")
-        return data
-
-    def _is_chat_messages(self, data: object) -> bool:
-        return isinstance(data, Sequence) and not isinstance(
-            data, (str, bytes, Template, ModelInput)
-        )
-
     def _squeeze_1d(self, x: Any) -> torch.Tensor:
         if isinstance(x, list):
             return torch.tensor(x, dtype=torch.long)
@@ -340,7 +248,7 @@ class BaseDecoder(ABC):
 
         if follow_prompt_format:
             promptfied_input = self._build_prompt(
-                input_text=input_text, output_text=output_text, *args, **kwargs
+                input_text, output_text, *args, **kwargs
             )
         else:
             assert isinstance(input_text, str)
@@ -374,6 +282,8 @@ class BaseDecoder(ABC):
             pixel_values = processor_output.get("pixel_values")
 
             if isinstance(self.model, Llama4ForConditionalGeneration):
+                if pixel_values is None:
+                    raise ValueError("Processor did not return pixel_values")
                 pixel_values = torch.cat(pixel_values)
             elif isinstance(self.model, Gemma3ForConditionalGeneration):
                 if isinstance(pixel_values, list):
@@ -399,7 +309,7 @@ class BaseDecoder(ABC):
 
         if follow_prompt_format:
             promptfied_partial_input = self._build_prompt(
-                input_text=input_text, output_text=None, *args, **kwargs
+                input_text, None, *args, **kwargs
             )
         else:
             assert isinstance(input_text, str)
@@ -551,7 +461,7 @@ class BaseDecoder(ABC):
 
     def _prepare_generation(
         self,
-        data: InferenceInput,
+        data: DataInput,
         params: GenerationParams | None = None,
         follow_prompt_format: bool = True,
     ) -> dict[str, Tensor] | None:
@@ -561,10 +471,7 @@ class BaseDecoder(ABC):
 
         self._log("Processing received input...'")
 
-        if self._is_chat_messages(data):
-            prompt = self._render_chat_messages(cast(Sequence[ChatMessage], data))
-            model_input = self._tokenize(input_text=prompt, follow_prompt_format=False)
-        elif isinstance(data, str):
+        if isinstance(data, str):
             model_input = self._tokenize(
                 input_text=data, follow_prompt_format=follow_prompt_format
             )
@@ -618,7 +525,7 @@ class BaseDecoder(ABC):
 
     def _generate(
         self,
-        data: InferenceInput,
+        data: DataInput,
         params: GenerationParams | None,
         force_json: bool,
         follow_prompt_format: bool,
@@ -665,7 +572,7 @@ class BaseDecoder(ABC):
 
     def _generate_stream(
         self,
-        data: InferenceInput,
+        data: DataInput,
         params: GenerationParams | None = None,
         force_json: bool = False,
         follow_prompt_format: bool = True,
@@ -684,7 +591,7 @@ class BaseDecoder(ABC):
             return
 
         streamer = TextIteratorStreamer(
-            self.tokenizer,
+            cast(Any, self.tokenizer),
             skip_prompt=skip_prompt,
             skip_special_tokens=skip_special_tokens,
         )
@@ -723,10 +630,9 @@ class BaseDecoder(ABC):
     @abstractmethod
     def generate(
         self,
-        data: InferenceInput | None = None,
+        data: DataInput,
         params: GenerationParams | None = None,
         force_json: bool = False,
-        messages: Sequence[ChatMessage] | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> str | None:
@@ -735,27 +641,24 @@ class BaseDecoder(ABC):
     @abstractmethod
     def generate_stream(
         self,
-        data: InferenceInput | None = None,
+        data: DataInput,
         params: GenerationParams | None = None,
         force_json: bool = False,
-        messages: Sequence[ChatMessage] | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> Iterator[str]:
         pass
 
     def unload_model(self) -> None:
-        try:
-            self._log("Trying to reset model...")
-            del self.model
-            gc.collect()
-            torch.cuda.empty_cache()
-            self.model = None
-            self.model_is_quantized = None
-            self._log("Reset successfully.")
-        except Exception as e:
-            self._log("Couldn't reset model...", LogLevel.ERROR)
-            self._log(f"{str(e)}", LogLevel.DEBUG)
+        self._log("Trying to reset model...")
+
+        self.model = None
+        self.model_is_quantized = None
+
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        self._log("Reset successfully.")
 
     def set_seed(self, seed: int) -> None:
         self._log(f"Setting seed value {seed}")

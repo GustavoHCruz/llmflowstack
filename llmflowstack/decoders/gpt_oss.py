@@ -1,12 +1,11 @@
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Literal
 
 from transformers.models.gpt_oss import GptOssForCausalLM
 from transformers.utils.quantization_config import Mxfp4Config
 
-from llmflowstack.decoders.base_decoder import BaseDecoder, InferenceInput, ModelInput
-from llmflowstack.schemas.messages import ChatMessage
+from llmflowstack.decoders.base_decoder import BaseDecoder, DataInput, ModelInput
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
@@ -115,12 +114,10 @@ class GptOss(BaseDecoder):
 
     def generate(
         self,
-        data: InferenceInput | None = None,
+        data: DataInput,
         params: GenerationParams | None = None,
         force_json: bool = False,
-        messages: Sequence[ChatMessage] | None = None,
     ) -> str | None:
-        data = self._resolve_generation_input(data, messages)
         if self.model is None or self.tokenizer is None:
             self._log("Model or Tokenizer missing", LogLevel.WARNING)
             return None
@@ -153,12 +150,10 @@ class GptOss(BaseDecoder):
 
     def generate_stream(
         self,
-        data: InferenceInput | None = None,
+        data: DataInput,
         params: GenerationParams | None = None,
         force_json: bool = False,
-        messages: Sequence[ChatMessage] | None = None,
     ) -> Iterator[str]:
-        data = self._resolve_generation_input(data, messages)
         streamer = self._generate_stream(
             data=data, params=params, force_json=force_json, follow_prompt_format=True
         )

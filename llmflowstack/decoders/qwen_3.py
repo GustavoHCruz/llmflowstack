@@ -1,4 +1,4 @@
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from pathlib import Path
 
 from PIL import Image
@@ -9,8 +9,7 @@ from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import (
     Qwen3_5MoeForConditionalGeneration,
 )
 
-from llmflowstack.decoders.base_decoder import BaseDecoder, InferenceInput, ModelInput
-from llmflowstack.schemas.messages import ChatMessage
+from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
@@ -133,13 +132,11 @@ class Qwen3(BaseDecoder):
 
     def generate(
         self,
-        data: InferenceInput | None = None,
+        data: ModelInput,
         params: GenerationParams | None = None,
         force_json: bool = False,
         follow_prompt_format: bool = True,
-        messages: Sequence[ChatMessage] | None = None,
     ) -> str | None:
-        data = self._resolve_generation_input(data, messages)
         if self.model is None or self.tokenizer is None:
             self._log("Model or Tokenizer missing", LogLevel.WARNING)
             return
@@ -177,13 +174,11 @@ class Qwen3(BaseDecoder):
 
     def generate_stream(
         self,
-        data: InferenceInput | None = None,
+        data: ModelInput,
         params: GenerationParams | None = None,
         force_json: bool = False,
         follow_prompt_format: bool = True,
-        messages: Sequence[ChatMessage] | None = None,
     ) -> Iterator[str]:
-        data = self._resolve_generation_input(data, messages)
         streamer = self._generate_stream(
             data=data,
             params=params,
