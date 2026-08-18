@@ -5,6 +5,7 @@ from .gpt_oss import GptOss
 from .llama_3 import Llama3
 from .llama_4 import Llama4
 from .medgemma import MedGemma
+from .muse_glimmer import MuseGlimmer
 from .qwen_3 import Qwen3
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "Llama3",
     "Llama4",
     "MedGemma",
+    "MuseGlimmer",
     "Qwen3",
 ]

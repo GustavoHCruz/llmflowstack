@@ -5,13 +5,11 @@ from .decoders.gpt_oss import GptOss
 from .decoders.llama_3 import Llama3
 from .decoders.llama_4 import Llama4
 from .decoders.medgemma import MedGemma
+from .decoders.muse_glimmer import MuseGlimmer
 from .decoders.qwen_3 import Qwen3
-from .schemas.messages import ChatMessage, ChatMessages
 from .schemas.params import GenerationParams, TrainParams
 
 __all__ = [
-    "ChatMessage",
-    "ChatMessages",
     "Gemma3",
     "Gemma4",
     "GenerationParams",
@@ -20,6 +18,7 @@ __all__ = [
     "Llama3",
     "Llama4",
     "MedGemma",
+    "MuseGlimmer",
     "Qwen3",
     "TrainParams",
 ]
