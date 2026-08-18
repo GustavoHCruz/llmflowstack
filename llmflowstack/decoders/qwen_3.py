@@ -9,7 +9,7 @@ from transformers.models.qwen3_5_moe.modeling_qwen3_5_moe import (
     Qwen3_5MoeForConditionalGeneration,
 )
 
-from llmflowstack.decoders.base_decoder import BaseDecoder, ModelInput
+from llmflowstack.decoders.base_decoder import BaseDecoder, DataInput, ModelInput
 from llmflowstack.schemas.params import GenerationParams
 from llmflowstack.utils.exceptions import MissingEssentialProp
 from llmflowstack.utils.logging import LogLevel
@@ -132,7 +132,7 @@ class Qwen3(BaseDecoder):
 
     def generate(
         self,
-        data: ModelInput,
+        data: DataInput,
         params: GenerationParams | None = None,
         force_json: bool = False,
         follow_prompt_format: bool = True,
@@ -174,7 +174,7 @@ class Qwen3(BaseDecoder):
 
     def generate_stream(
         self,
-        data: ModelInput,
+        data: DataInput,
         params: GenerationParams | None = None,
         force_json: bool = False,
         follow_prompt_format: bool = True,
