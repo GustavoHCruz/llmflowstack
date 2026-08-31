@@ -17,30 +17,37 @@ The goal is to make experimentation with LLMs more accessible without requiring 
 This framework is designed to provide flexibility when working with different open-source and commercial LLMs. Currently, the following models are supported:
 
 - **GPT-OSS**
+
   - [`GPT-OSS 20B`](https://huggingface.co/openai/gpt-oss-20b)
   - [`GPT-OSS 120B`](https://huggingface.co/openai/gpt-oss-120b)
 
 - **LLaMA 3**
+
   - [`LLaMA 3.1 8B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-8B-Instruct)
   - [`LLaMA 3.1 70B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-70B-Instruct)
   - [`LLaMA 3.3 70B - Instruct`](https://huggingface.co/meta-llama/Llama-3.3-70B-Instruct)
   - [`LLaMA 3.1 405B - Instruct`](https://huggingface.co/meta-llama/Llama-3.1-405B-Instruct)
 
 - **LLaMA 4**
+
   - [`LLaMA 4 Scout - Instruct`](https://huggingface.co/meta-llama/Llama-4-Scout-17B-16E-Instruct)
 
 - **Gemma 3**
+
   - [`Gemma 3 27B - It`](https://huggingface.co/google/gemma-3-27b-it)
 
 - **MedGemma**
+
   - [`MedGemma 4B - It`](https://huggingface.co/google/medgemma-4b-it)
   - [`MedGemma 27B - It`](https://huggingface.co/google/medgemma-27b-it)
 
 - **Gemma 4**
+
   - [`Gemma 4 12B It`](https://huggingface.co/google/gemma-4-12B-it)
   - [`Gemma 4 32B It`](https://huggingface.co/google/gemma-4-31B-it)
 
 - **Qwen 3.5**
+
   - [`Qwen 3.5 0.8B`](https://huggingface.co/Qwen/Qwen3.5-0.8B)
   - [`Qwen 3.5 2B`](https://huggingface.co/Qwen/Qwen3.5-2B)
   - [`Qwen 3.5 4B`](https://huggingface.co/Qwen/Qwen3.5-4B)
@@ -49,11 +56,15 @@ This framework is designed to provide flexibility when working with different op
   - [`Qwen 3.5 35B - A3B`](https://huggingface.co/Qwen/Qwen3.5-35B-A3B)
   - [`Qwen 3.5 122B - A10B`](https://huggingface.co/Qwen/Qwen3.5-122B-A10B)
   - [`Qwen 3.5 397B - A17B`](https://huggingface.co/Qwen/Qwen3.5-397B-A17B)
-  - [`Qwen 3.8 27B`](https://huggingface.co/Qwen/Qwen3.8-27B)
 
 - **Qwen 3.6**
+
   - [`Qwen 3.6 27B`](https://huggingface.co/Qwen/Qwen3.6-27B)
   - [`Qwen 3.6 35B - A3B`](https://huggingface.co/Qwen/Qwen3.6-35B-A3B)
+
+- **Qwen 3.8**
+
+  - [`Qwen 3.8 27B`](https://huggingface.co/Qwen/Qwen3.8-27B)
 
 - **Muse Glimmer**
   - [`Muse Glimmer 30B`](https://huggingface.co/meta-models/Muse-Glimmer-30B)
